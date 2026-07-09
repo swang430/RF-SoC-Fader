@@ -1,0 +1,672 @@
+# -*- coding: utf-8 -*-
+"""
+RT仿真结果 -> TDL模型 -> 信道模拟器控制帧
+
+适用数据：
+    字段包括：
+        RaysProperties
+        RaysCTF
+        Frequency
+        NumberRays
+        TxRx
+        CTF
+        ReceivedPower_COH
+        ReceivedPower_NONCOH
+主要输出：
+    1. channel_simulator_tdl.csv
+       处理后的TDL参数表
+
+    2. control_frame.bin
+       可发送给信道模拟器的二进制控制帧
+
+    3. control_frame_hex.txt
+       控制帧十六进制文本，便于检查和调试
+"""
+
+import os
+import struct
+import numpy as np
+import pandas as pd
+import scipy.io as sio
+
+
+# ============================================================
+# 1. 用户配置区
+# ============================================================
+
+MAT_FILE = r"frame_7.mat"      # 修改为你的mat文件路径
+
+INPUT_ID = 0                   # 信道模拟器输入端ID，范围0~7
+OUTPUT_ID = 0                  # 信道模拟器输出端ID，范围0~7
+
+MAX_HW_PATHS = 24              # 当前设备明确支持24条多径，按24条处理
+USE_RAYS_CTF = True            # True: 使用RaysCTF作为每条径复增益；False: 使用RaysProperties中的E_RE/E_Im
+FREQ_INDEX = 0                 # 使用第几个频点的RaysCTF，0表示第一个频点
+
+TDL_POWER_MODE = "noncoherent"
+# "noncoherent": 同一时延bin内功率非相干叠加，更适合构造PDP/TDL
+# "coherent": 同一时延bin内复增益相干叠加，更接近某个频点的CTF
+
+RESET_FIRST = True             # 是否先执行参数复位
+ENABLE_INFO_RETURN = True      # 是否打开一次信息帧回传，便于调试
+ENABLE_COPY_RETURN = True      # 是否打开复制帧回传，便于确认设备收到的控制帧
+
+OUTPUT_ATTENUATION_LINEAR = 1.0
+# 输出端整体幅度衰减，1.0表示不衰减。
+# 如果后续发现输出溢出，可以改成0.5、0.25等。
+
+WRITE_PHASE = True
+# 是否写入每条径相偏。
+# 注意：协议中相偏表格是简写；当前设备明确24条多径均支持相偏。
+
+MAX_PHASE_PATHS = 24
+
+WRITE_DOPPLER = False
+# 当前frame_7.mat中没有直接给每条径的多普勒。
+# 如果后续有连续快照，可由相位随时间变化或几何速度计算多普勒后再打开。
+
+DOPPLER_HZ_DEFAULT = 0.0
+
+SEND_TO_DEVICE = False         # 是否直接通过串口发送
+SERIAL_PORT = "COM3"           # Windows示例：COM3；Linux示例：/dev/ttyUSB0
+BAUDRATE = 115200              # 按你的上位机/设备实际配置修改
+
+
+# ============================================================
+# 2. 信道模拟器协议参数
+# ============================================================
+
+FRAME_HEADER = bytes.fromhex("FD B1 85 40")
+FRAME_TAIL = bytes.fromhex("AE 86")
+
+MAX_FRAME_PAYLOAD_LEN = 4000
+
+ID_GLOBAL_ENABLE = 1
+ID_PATH_ENABLE = 2
+ID_PATH_DELAY = 3
+ID_PATH_DOPPLER = 4
+ID_PATH_ATTENUATION = 7
+ID_AWGN_ENABLE = 8
+ID_OUTPUT_ENABLE = 10
+ID_OUTPUT_ATTENUATION = 11
+ID_RESET = 13
+ID_INFO_RETURN = 14
+ID_COPY_RETURN = 15
+ID_PHASE = 32
+ID_FREQ_PHASE_ZERO = 33
+
+# 多径主时延单位：1000/120 ns
+PATH_DELAY_UNIT_NS = 1000.0 / 120.0
+
+# 多径主时延参数范围：0~1050
+PATH_DELAY_CODE_MIN = 0
+PATH_DELAY_CODE_MAX = 1050
+
+# 多径幅值衰减单位：1/32768
+PATH_AMP_SCALE = 32768.0
+
+# 输出端幅值衰减单位：1/16384
+OUTPUT_AMP_SCALE = 16384.0
+
+# 相偏范围：0~4095 对应 0~2pi
+PHASE_SCALE = 4096.0
+
+# 多径频移单位：1/35.791394133 Hz
+DOPPLER_UNIT_HZ = 1.0 / 35.791394133
+
+
+# ============================================================
+# 3. 基础工具函数
+# ============================================================
+
+def load_mat_file(mat_file):
+    """加载MAT文件。"""
+    data = sio.loadmat(mat_file)
+    return {k: v for k, v in data.items() if not k.startswith("__")}
+
+
+def io_byte(input_id, output_id):
+    """输入输出端编码：高4bit为输入端，低4bit为输出端。"""
+    if not (0 <= input_id <= 7 and 0 <= output_id <= 7):
+        raise ValueError("input_id和output_id必须在0~7之间")
+    return ((input_id & 0x0F) << 4) | (output_id & 0x0F)
+
+
+def make_subframe(param_id, payload, io=0x00, info=0x00):
+    """
+    构造参数子帧：
+        参数ID     1字节
+        参数长度   1字节
+        输入输出端 1字节
+        补充信息   1字节
+        参数内容值 N字节
+    """
+    if isinstance(payload, int):
+        payload = bytes([payload])
+
+    if len(payload) > 255:
+        raise ValueError("普通参数子帧payload长度不能超过255字节")
+
+    return bytes([
+        param_id & 0xFF,
+        len(payload) & 0xFF,
+        io & 0xFF,
+        info & 0xFF
+    ]) + payload
+
+
+def build_control_frame(subframes):
+    """
+    构造完整控制帧：
+        帧头4字节 + 帧长度2字节小端 + 参数子帧 + 帧尾2字节
+    """
+    payload = b"".join(subframes)
+
+    if len(payload) > MAX_FRAME_PAYLOAD_LEN:
+        raise ValueError(f"控制帧payload长度={len(payload)}，超过协议限制{MAX_FRAME_PAYLOAD_LEN}")
+
+    length_bytes = struct.pack("<H", len(payload))
+    return FRAME_HEADER + length_bytes + payload + FRAME_TAIL
+
+
+def clip_int(value, vmin, vmax):
+    return int(max(vmin, min(vmax, round(value))))
+
+
+def delay_ns_to_code(delay_ns):
+    """ns时延转换为模拟器多径主时延码。"""
+    code = delay_ns / PATH_DELAY_UNIT_NS
+    return clip_int(code, PATH_DELAY_CODE_MIN, PATH_DELAY_CODE_MAX)
+
+
+def delay_code_to_ns(code):
+    return code * PATH_DELAY_UNIT_NS
+
+
+def amp_linear_to_code(amp_linear):
+    """
+    线性幅度 -> 多径幅值衰减码。
+    协议单位为1/32768。
+    """
+    code = amp_linear * PATH_AMP_SCALE
+    return clip_int(code, 0, 65535)
+
+
+def output_amp_linear_to_code(amp_linear):
+    """
+    输出端线性幅度 -> 输出端幅值衰减码。
+    协议单位为1/16384。
+    """
+    code = amp_linear * OUTPUT_AMP_SCALE
+    return clip_int(code, 0, 65535)
+
+
+def phase_rad_to_code(phase_rad):
+    """
+    相位rad -> 0~4095。
+    """
+    phase = phase_rad % (2.0 * np.pi)
+    code = phase / (2.0 * np.pi) * PHASE_SCALE
+    return int(round(code)) % 4096
+
+
+def doppler_hz_to_code(doppler_hz):
+    """
+    Hz -> 多径频移码。
+    协议单位为1/35.791394133 Hz。
+    """
+    code = doppler_hz / DOPPLER_UNIT_HZ
+    code = clip_int(code, -(2 ** 27), 2 ** 27 - 1)
+    return code
+
+
+# ============================================================
+# 4. 从RT结果提取TDL
+# ============================================================
+
+def extract_ray_gain(data):
+    """
+    提取每条射线的复增益。
+
+    优先使用RaysCTF：
+        RaysCTF第1部分为实部，第2部分为虚部。
+
+    如果不用RaysCTF，则使用RaysProperties：
+        第5列 E_RE
+        第6列 E_Im
+    """
+    rays = np.asarray(data["RaysProperties"], dtype=np.float64)
+
+    if USE_RAYS_CTF and "RaysCTF" in data:
+        rays_ctf = np.asarray(data["RaysCTF"], dtype=np.float64)
+
+        if rays_ctf.ndim != 2:
+            raise ValueError("RaysCTF维度异常")
+
+        n_col = rays_ctf.shape[1]
+        if n_col % 2 != 0:
+            raise ValueError("RaysCTF列数应为2*freqPoint，前半为实部，后半为虚部")
+
+        freq_point = n_col // 2
+        if not (0 <= FREQ_INDEX < freq_point):
+            raise ValueError(f"FREQ_INDEX超出范围，当前freqPoint={freq_point}")
+
+        gain_real = rays_ctf[:, FREQ_INDEX]
+        gain_imag = rays_ctf[:, FREQ_INDEX + freq_point]
+        gain = gain_real + 1j * gain_imag
+
+    else:
+        gain_real = rays[:, 4]     # RaysProperties第5列，Python索引4
+        gain_imag = rays[:, 5]     # RaysProperties第6列，Python索引5
+        gain = gain_real + 1j * gain_imag
+
+    return gain
+
+
+def build_tdl_from_rt(data, max_paths=24):
+    """
+    RT射线结果 -> 硬件可配置TDL。
+
+    处理逻辑：
+        1. 读取每条射线delay和复增益；
+        2. 按信道模拟器时延分辨率进行量化；
+        3. 同一量化时延bin内进行合并；
+        4. 按功率选取最强max_paths条；
+        5. 转换为模拟器需要的delay_code、amp_code、phase_code。
+    """
+    rays = np.asarray(data["RaysProperties"], dtype=np.float64)
+    gain = extract_ray_gain(data)
+
+    # RaysProperties第3列为delay，单位按示例数据判断为秒
+    delay_s = rays[:, 2]
+    delay_ns = delay_s * 1e9
+
+    # 基础过滤
+    power_each_ray = np.abs(gain) ** 2
+    valid = (
+        np.isfinite(delay_ns) &
+        np.isfinite(power_each_ray) &
+        (power_each_ray > 0)
+    )
+
+    delay_ns = delay_ns[valid]
+    gain = gain[valid]
+    power_each_ray = power_each_ray[valid]
+
+    # 转换到硬件时延码，并过滤超出范围的路径
+    delay_code = np.round(delay_ns / PATH_DELAY_UNIT_NS).astype(int)
+    in_range = (
+        (delay_code >= PATH_DELAY_CODE_MIN) &
+        (delay_code <= PATH_DELAY_CODE_MAX)
+    )
+
+    delay_ns = delay_ns[in_range]
+    gain = gain[in_range]
+    power_each_ray = power_each_ray[in_range]
+    delay_code = delay_code[in_range]
+
+    if len(delay_ns) == 0:
+        raise ValueError("没有可用射线路径，请检查delay或gain字段")
+
+    # 按硬件delay_code合并
+    unique_codes = np.unique(delay_code)
+    rows = []
+
+    for code in unique_codes:
+        idx = np.where(delay_code == code)[0]
+
+        gain_group = gain[idx]
+        power_group = power_each_ray[idx]
+        delay_group = delay_ns[idx]
+
+        coherent_gain = np.sum(gain_group)
+        coherent_power = np.abs(coherent_gain) ** 2
+        noncoherent_power = np.sum(power_group)
+
+        if np.sum(power_group) > 0:
+            weighted_delay_ns = np.sum(delay_group * power_group) / np.sum(power_group)
+        else:
+            weighted_delay_ns = delay_code_to_ns(code)
+
+        if TDL_POWER_MODE.lower() == "coherent":
+            selected_power = coherent_power
+        elif TDL_POWER_MODE.lower() == "noncoherent":
+            selected_power = noncoherent_power
+        else:
+            raise ValueError("TDL_POWER_MODE只能是'coherent'或'noncoherent'")
+
+        if np.abs(coherent_gain) > 0:
+            phase_rad = np.angle(coherent_gain)
+        else:
+            phase_rad = 0.0
+
+        rows.append({
+            "delay_code": int(code),
+            "delay_actual_ns": delay_code_to_ns(code),
+            "delay_weighted_ns": weighted_delay_ns,
+            "ray_count_in_bin": len(idx),
+            "coherent_gain_real": np.real(coherent_gain),
+            "coherent_gain_imag": np.imag(coherent_gain),
+            "coherent_power": coherent_power,
+            "noncoherent_power": noncoherent_power,
+            "selected_power": selected_power,
+            "phase_rad": phase_rad,
+            "doppler_Hz": DOPPLER_HZ_DEFAULT,
+        })
+
+    df = pd.DataFrame(rows)
+
+    # 去除合并后功率为0的bin
+    df = df[df["selected_power"] > 0].copy()
+
+    if len(df) == 0:
+        raise ValueError("合并后没有有效TDL路径")
+
+    # 选取最强max_paths条
+    df = df.sort_values("selected_power", ascending=False).head(max_paths).copy()
+
+    # 为了硬件配置和PDP查看更清楚，最终按时延升序排列
+    df = df.sort_values("delay_code", ascending=True).reset_index(drop=True)
+
+    # 相对功率和幅度归一化
+    p_max = df["selected_power"].max()
+    df["relative_power_dB"] = 10.0 * np.log10(df["selected_power"] / p_max)
+
+    df["amp_linear"] = np.sqrt(df["selected_power"] / p_max)
+    df["amp_code"] = df["amp_linear"].apply(amp_linear_to_code)
+
+    df["phase_code"] = df["phase_rad"].apply(phase_rad_to_code)
+    df["doppler_code"] = df["doppler_Hz"].apply(doppler_hz_to_code)
+
+    # 硬件多径编号，协议补充信息中从0开始表示多径1
+    df["hw_path_index"] = np.arange(len(df), dtype=int)
+    df["hw_path_id"] = df["hw_path_index"] + 1
+
+    # 整理字段顺序
+    cols = [
+        "hw_path_id",
+        "hw_path_index",
+        "delay_weighted_ns",
+        "delay_actual_ns",
+        "delay_code",
+        "relative_power_dB",
+        "amp_linear",
+        "amp_code",
+        "phase_rad",
+        "phase_code",
+        "doppler_Hz",
+        "doppler_code",
+        "ray_count_in_bin",
+        "coherent_power",
+        "noncoherent_power",
+        "selected_power",
+    ]
+
+    return df[cols]
+
+
+# ============================================================
+# 5. TDL -> 信道模拟器控制帧
+# ============================================================
+
+def make_channel_simulator_frame(tdl_df, input_id=0, output_id=0):
+    """
+    根据TDL表生成信道模拟器控制帧。
+    """
+    subframes = []
+
+    ch_io = io_byte(input_id, output_id)
+    out_io = io_byte(0, output_id)
+
+    # 1) 可选：参数复位
+    if RESET_FIRST:
+        subframes.append(
+            make_subframe(
+                ID_RESET,
+                bytes([1]),
+                io=0x00,
+                info=0x00
+            )
+        )
+
+    # 2) 可选：复制帧回传
+    if ENABLE_COPY_RETURN:
+        subframes.append(
+            make_subframe(
+                ID_COPY_RETURN,
+                bytes([1]),
+                io=0x00,
+                info=0x00
+            )
+        )
+
+    # 3) 可选：信息帧回传一次
+    if ENABLE_INFO_RETURN:
+        # 0x03：发1次后关闭
+        subframes.append(
+            make_subframe(
+                ID_INFO_RETURN,
+                bytes([0x03]),
+                io=0x00,
+                info=0x00
+            )
+        )
+
+    # 4) 全局使能
+    subframes.append(
+        make_subframe(
+            ID_GLOBAL_ENABLE,
+            bytes([1]),
+            io=0x00,
+            info=0x00
+        )
+    )
+
+    # 5) 输出端使能
+    subframes.append(
+        make_subframe(
+            ID_OUTPUT_ENABLE,
+            bytes([1]),
+            io=out_io,
+            info=0x00
+        )
+    )
+
+    # 6) 输出端整体幅值衰减
+    output_att_code = output_amp_linear_to_code(OUTPUT_ATTENUATION_LINEAR)
+    subframes.append(
+        make_subframe(
+            ID_OUTPUT_ATTENUATION,
+            struct.pack("<H", output_att_code),
+            io=out_io,
+            info=0x00
+        )
+    )
+
+    # 7) 默认关闭AWGN，避免未设SNR时引入噪声
+    subframes.append(
+        make_subframe(
+            ID_AWGN_ENABLE,
+            bytes([0]),
+            io=out_io,
+            info=0x00
+        )
+    )
+
+    # 8) 先关闭所有多径，避免之前残留配置影响
+    for path_idx in range(MAX_HW_PATHS):
+        subframes.append(
+            make_subframe(
+                ID_PATH_ENABLE,
+                bytes([0]),
+                io=ch_io,
+                info=path_idx
+            )
+        )
+
+    # 9) 配置有效多径
+    for _, row in tdl_df.iterrows():
+        path_idx = int(row["hw_path_index"])
+
+        delay_code = int(row["delay_code"])
+        amp_code = int(row["amp_code"])
+        phase_code = int(row["phase_code"])
+        doppler_code = int(row["doppler_code"])
+
+        # 多径使能
+        subframes.append(
+            make_subframe(
+                ID_PATH_ENABLE,
+                bytes([1]),
+                io=ch_io,
+                info=path_idx
+            )
+        )
+
+        # 多径主时延，int16，小端
+        subframes.append(
+            make_subframe(
+                ID_PATH_DELAY,
+                struct.pack("<h", delay_code),
+                io=ch_io,
+                info=path_idx
+            )
+        )
+
+        # 多径幅值衰减，uint16，小端
+        subframes.append(
+            make_subframe(
+                ID_PATH_ATTENUATION,
+                struct.pack("<H", amp_code),
+                io=ch_io,
+                info=path_idx
+            )
+        )
+
+        # 多径相偏
+        if WRITE_PHASE and path_idx < MAX_PHASE_PATHS:
+            subframes.append(
+                make_subframe(
+                    ID_PHASE,
+                    struct.pack("<H", phase_code),
+                    io=ch_io,
+                    info=path_idx
+                )
+            )
+
+        # 多径频移
+        if WRITE_DOPPLER:
+            subframes.append(
+                make_subframe(
+                    ID_PATH_DOPPLER,
+                    struct.pack("<i", doppler_code),
+                    io=ch_io,
+                    info=path_idx
+                )
+            )
+
+    # 10) 频偏相位归零
+    # 如果使用多径频移或相偏同步，可执行一次
+    if WRITE_DOPPLER:
+        subframes.append(
+            make_subframe(
+                ID_FREQ_PHASE_ZERO,
+                bytes([1]),
+                io=0x00,
+                info=0x00
+            )
+        )
+
+    frame = build_control_frame(subframes)
+    return frame
+
+
+# ============================================================
+# 6. 保存结果与可选发送
+# ============================================================
+
+def save_outputs(mat_file, tdl_df, frame_bytes):
+    base = os.path.splitext(os.path.basename(mat_file))[0]
+
+    csv_file = f"{base}_channel_simulator_tdl.csv"
+    bin_file = f"{base}_control_frame.bin"
+    hex_file = f"{base}_control_frame_hex.txt"
+
+    tdl_df.to_csv(csv_file, index=False, encoding="utf-8-sig")
+
+    with open(bin_file, "wb") as f:
+        f.write(frame_bytes)
+
+    hex_str = frame_bytes.hex(" ").upper()
+    with open(hex_file, "w", encoding="utf-8") as f:
+        f.write(hex_str)
+
+    print("处理完成，已生成：")
+    print(f"  TDL参数表: {csv_file}")
+    print(f"  控制帧bin: {bin_file}")
+    print(f"  控制帧hex: {hex_file}")
+    print()
+    print(f"控制帧总长度: {len(frame_bytes)} 字节")
+    print(f"控制帧前64字节预览:")
+    print(" ".join(frame_bytes[:64].hex(" ").upper().split()))
+
+
+def send_frame_to_device(frame_bytes):
+    """
+    可选：通过串口发送控制帧。
+    如果你的设备不是串口，而是TCP/UDP，只需要替换这里的发送方式。
+    """
+    import serial
+
+    with serial.Serial(SERIAL_PORT, BAUDRATE, timeout=1) as ser:
+        ser.write(frame_bytes)
+        ser.flush()
+
+    print(f"已通过 {SERIAL_PORT} 发送 {len(frame_bytes)} 字节控制帧")
+
+
+# ============================================================
+# 7. 主函数
+# ============================================================
+
+def main():
+    data = load_mat_file(MAT_FILE)
+
+    print("MAT文件字段：")
+    for k, v in data.items():
+        if hasattr(v, "shape"):
+            print(f"  {k}: shape={v.shape}, dtype={v.dtype}")
+        else:
+            print(f"  {k}: {type(v)}")
+
+    print()
+
+    tdl_df = build_tdl_from_rt(data, max_paths=MAX_HW_PATHS)
+
+    print("生成的TDL路径：")
+    print(tdl_df[[
+        "hw_path_id",
+        "delay_actual_ns",
+        "delay_code",
+        "relative_power_dB",
+        "amp_code",
+        "phase_code",
+        "ray_count_in_bin"
+    ]])
+
+    print()
+
+    frame_bytes = make_channel_simulator_frame(
+        tdl_df,
+        input_id=INPUT_ID,
+        output_id=OUTPUT_ID
+    )
+
+    save_outputs(MAT_FILE, tdl_df, frame_bytes)
+
+    if SEND_TO_DEVICE:
+        send_frame_to_device(frame_bytes)
+
+
+if __name__ == "__main__":
+    main()

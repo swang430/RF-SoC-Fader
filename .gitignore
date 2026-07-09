@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# 测试与覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+*.swp
+
+# 数据与产物（不入库大文件/生成物）
+*.mat
+*.mpdb
+*.bin
+*_control_frame_hex.txt
+*_channel_simulator_tdl.csv
+
+# 保留：协议文档与设计文档需要入库，不在此排除

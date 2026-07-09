@@ -4,13 +4,22 @@
 
 ## 项目概览
 
-RF-SoC-Fader 是一套**信道模拟器（Channel Simulator）控制帧生成工具**。核心流程：
+RF-SoC-Fader 正在从「信道模拟器控制帧生成工具」演进为**可商业运行的信道仿真控制平台（CEP）**。目标形态：
 
 ```
-RT 射线仿真结果 (.mat)  →  TDL 多径模型  →  设备控制帧 (二进制 / HEX)
+模型来源（RT/MPDB · 38.901/ChannelEgine） → 统一内部信道表示(canonical model) → 多后端（RF-SoC 二进制/TCP · .asc CIR） → 设备
+                                                                              ↑
+                                                              分层 API（REST 主 · Python SDK · SCPI）
 ```
 
-即把光线追踪（RT）仿真得到的射线数据，量化合并成硬件可配置的抽头延迟线（TDL）模型，再按「信道模拟器3协议 V3.0」编码成可直接下发给设备的控制帧。
+**总体设计见 [`docs/design/`](docs/design/README.md)（第一册·总体设计已就位，评审中）**。关键约定：
+- 五层单向依赖：`L5 客户端 → L4 API → L3 服务/编排 → L2 设备后端 → L1 编解码`。
+- **canonical model** 是解耦「模型来源」与「设备后端」的枢纽契约（承载一等但可选的时间轴 static/time_varying）。
+- **ChannelEgine**（3GPP TR 38.901 引擎，`/Users/Simon/Tools/ChannelEgine`，独立 git repo）以**微服务**形态集成，仅用其引擎能力、不复用其 GUI。
+- **RT 输入为 MPDB**（HyperRT 多径数据库，含角度/复增益/天线坐标），**不支持 .mat**。
+- **MIMO 空间相关**：本期交付 B 档（几何相关精确复现 + 衰落统计等效），A 档（时变 CIR 注入）预留接口，待硬件确认（见 `docs/design/00-overall/12-risks-open-items.md`）。
+
+现有 `ChannelSimulationCode/channel_simulator/` 是 L1 的一部分与 L2/L3 的雏形（离线 `.mat → TDL → 控制帧文件`，覆盖协议 13/35 ID，且重构后丢失了下发能力）。新开发以上述平台架构为准。
 
 ## 目录结构
 

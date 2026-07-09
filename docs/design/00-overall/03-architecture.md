@@ -62,7 +62,7 @@
 - **现状**：**重构后丢失下发能力，需在此层以 TCP 找回**（原脚本是串口）。
 
 ### L3 · 服务/编排（业务核心）
-- **信道模型引擎（集成 ChannelEgine）**：统计信道生成/编辑，产出收敛到 canonical model。
+- **信道模型引擎（集成 ChannelEgine，微服务形态）**：ChannelEgine 作为**独立微服务**运行，L3 经**服务客户端（RPC/REST）**调用其 38.901 生成/编辑能力，结果收敛到 canonical model。L3 内只保留一层薄封装（`ChannelEngineClient`），不在本进程加载其算法代码——故障隔离、可独立部署/伸缩、依赖不污染主进程。
 - **RT/MPDB 导入管线**：MPDB→量化合并→选径≤24→归一化→canonical model（见《05》）。
 - **相关性合成 `CorrelationSynthesizer`**：角度+阵列几何→导向矢量→`R_tx⊗R_rx`→逐信道权重；B 默认 / A 预留（见《06》）。
 - **场景 & 会话状态机**：会话生命周期、下发事务、配置持久化。
@@ -89,18 +89,24 @@
 ```
 CanonicalChannelModel
 ├── meta:         载频、带宽、时间基准、坐标/单位约定、来源(RT/38.901)
+├── time:         ★ 一等但可选的时间轴 { mode: static|time_varying,
+│                   snapshots?: 时刻序列, update_rate?, duration? }
+│                   - static：单快照（B 档默认，准静态回放）
+│                   - time_varying：多快照/时变（A 档、移动性、多普勒演化）
 ├── grid:         信道栅格拓扑（8×8 / 4×8 ...）、有效信道对集合
 ├── channels[]:   每个信道对 (input, output)
 │   ├── taps[]:   每径 { delay_s, gain_complex, doppler_hz, rayleigh_spec?, phase }
+│   │             （time_varying 时，taps 可为随 time.snapshots 变化的序列）
 │   ├── corr:     该信道对相关性元数据（角度、导向矢量、R 的引用）
-│   └── cir?:     可选的时变 CIR 序列（A 档 / .asc 后端使用）
+│   └── cir?:     可选的时变 CIR 序列（A 档 / .asc 后端使用；隶属 time 轴）
 ├── correlation:  全局/分组相关矩阵 R（R_tx, R_rx, Kronecker 组合）
 └── impairments:  AWGN、输出衰减、扫频、信号源等设备无关的损伤描述
 ```
 
 **设计要点**：
-- **两条上游源都必须能产出它**：MPDB 导入产 taps+角度+corr；ChannelEgine 产 taps/cir+38.901 相关。
-- **两个下游后端都只依赖它**：RFSoCBackend 读 taps+impairments 组帧；AscCirBackend 读 cir/taps 渲染 `.asc`。
+- **时间轴是一等但可选维度**：默认 `static` 单快照，常见场景零额外复杂度；`time_varying` 承载 A 档时变 CIR、移动性与多普勒演化，`cir` 与时变 taps 都挂在此轴下。上游 ChannelEgine 的 `.asc`（多 CIR 时序）天然映射到 `time_varying`。
+- **两条上游源都必须能产出它**：MPDB 导入产 taps+角度+corr（默认 static）；ChannelEgine 产 taps/cir+38.901 相关（可 time_varying）。
+- **两个下游后端都只依赖它**：RFSoCBackend 读 taps+impairments 组帧（static 或逐快照）；AscCirBackend 读 cir/taps 渲染 `.asc`。
 - **相关性是模型的一等属性**，不是后端临时算的——保证多后端一致。
 - 改此契约需同步 L3 生产方与 L2 消费方及测试（沿用现有「DataFrame 是接口」的纪律，升级为结构化模型）。
 
@@ -134,19 +140,24 @@ Client        L4 API        L3 服务                         L2 后端         
 ## 6. 部署视图（本期单机，详见《10》）
 
 ```
-┌─────────────────────── 部署单元（单机） ───────────────────────┐
-│  CEP 服务进程 (Python/asyncio)                                  │
-│   ├ API 网关 (FastAPI, 监听 HTTP/SCPI-TCP)                      │
-│   ├ L3 服务 (含 ChannelEgine 集成、导入、相关、会话)            │
-│   └ L2 后端 (RFSoCBackend→设备 TCP；AscCirBackend→文件)         │
-│  依赖：numpy/scipy、PyTorch、(HyperRT SDK 视 MPDB 接入方式)     │
-└───────────────┬─────────────────────────────┬──────────────────┘
+┌─────────────────────── 部署单元（单机/单节点，可多进程） ───────────────────────┐
+│  CEP 主服务进程 (Python/asyncio)                                                │
+│   ├ API 网关 (FastAPI, 监听 HTTP/SCPI-TCP)                                      │
+│   ├ L3 服务 (导入、相关、会话、遥测) + ChannelEngineClient(薄封装)              │
+│   └ L2 后端 (RFSoCBackend→设备 TCP；AscCirBackend→文件)                         │
+│  依赖：numpy/scipy、asyncio                                                     │
+│                                                                                │
+│  ChannelEgine 微服务 (独立进程/容器)  ◄──RPC/REST── ChannelEngineClient         │
+│   └ 38.901 引擎 + PyTorch（依赖隔离，独立伸缩/部署）                            │
+│  MPDB 接入 (视《12》定：随产品部署 HyperRT SDK，或 MPQL 导出 CSV 解耦)          │
+└───────────────┬─────────────────────────────┬──────────────────────────────────┘
                 │ TCP                          │ file
         ┌───────▼────────┐            ┌────────▼────────┐
         │  RF-SoC 设备    │            │ .asc 回放设备    │
         └────────────────┘            └─────────────────┘
 ```
-- ChannelEgine 集成形态（同进程库 vs 子进程/服务）与 MPDB 依赖是否随产品部署，是待定项（见《12》）。
+- **ChannelEgine 以微服务形态集成**（独立进程/容器，经 RPC/REST 调用）：主进程不加载其算法与 PyTorch 依赖，故障隔离、可独立伸缩。契约在《07-channel-model-engine》定义。
+- MPDB 依赖是否随产品部署仍为待定项（见《12》）。
 
 ---
 
@@ -158,15 +169,17 @@ Client        L4 API        L3 服务                         L2 后端         
 | ADR-2 | canonical model 作枢纽 | 解耦多源×多后端 | 各后端各自从源转换（N×M 组合爆炸） |
 | ADR-3 | Python 全栈 | 复用现有包与两上游引擎；无样本级实时压力 | C++ 核心（过度设计，衔接成本高） |
 | ADR-4 | 相关性做成可插拔策略 | B 先行、A 预留，随硬件能力升级 | 写死一种（无法演进） |
-| ADR-5 | 集成 ChannelEgine（不复用其 GUI） | 不重造 38.901；GUI 另设计 | 自研引擎（重复造轮子） |
+| ADR-5 | 集成 ChannelEgine（**微服务**，不复用其 GUI） | 不重造 38.901；依赖隔离、故障隔离、可独立伸缩；GUI 另设计 | 同进程库调用（PyTorch 依赖污染主进程、耦合升级）；自研引擎（重复造轮子） |
 | ADR-6 | TCP 传输 | 产品形态为以太网；吞吐优于串口 | 串口（带宽不足，64×24+1024B 系数慢） |
+| ADR-7 | canonical model 承载**一等但可选**时间轴 | 同时容纳 static（B 档）与 time_varying（A 档/移动性），常见场景零额外复杂度 | 只做单快照（无法承载 A 档/时变）；时间轴强制必填（常见场景过度复杂） |
 
 ---
 
 ## 8. 开放问题
-1. ChannelEgine 集成形态（同进程 / 子进程 / 微服务）——影响依赖打包与故障隔离。
-2. canonical model 是否需要承载**时间轴**（多快照/时变）作为一等维度，还是按需附 `cir`。
+1. ~~ChannelEgine 集成形态~~ → **已定：微服务**（独立进程/容器，RPC/REST）。契约细节见《07》。
+2. ~~canonical model 是否承载时间轴~~ → **已定：一等但可选**（static / time_varying，见 §4、ADR-7）。
 3. 分帧策略与事务边界在 L2 还是 L3（见《11》事务化下发）。
+4. ChannelEngineClient 的传输与序列化（gRPC / REST / 消息队列）——《07》定。
 
 ## 9. 本篇验收
 - 五层职责边界无重叠、依赖严格单向。

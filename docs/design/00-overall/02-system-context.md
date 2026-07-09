@@ -33,7 +33,7 @@
 | 外部系统 | 方向 | 接口/协议 | 内容 | 归属 |
 | :--- | :--- | :--- | :--- | :--- |
 | **HyperRT / MPDB** | 入 | Python `MPDB.load()`（PyTorch 张量）或 MPQL 导出 CSV | 射线多径：DELAY/H/AoA/ZoA/AoD/ZoD/天线坐标 | 外部 SDK |
-| **ChannelEgine 引擎** | 入 | 服务/函数调用（`ChannelSimulator` 类等） | 38.901 信道：LSP/簇/角度/功率/时延/XPR，及时变 CIR | 兄弟项目（集成，**不含其 GUI**） |
+| **ChannelEgine 引擎** | 入 | **微服务 RPC/REST**（经 `ChannelEngineClient`） | 38.901 信道：LSP/簇/角度/功率/时延/XPR，及时变 CIR | 兄弟项目（独立微服务集成，**不含其 GUI**） |
 | **RF-SoC 仿真器** | 出/入 | 协议 V3.0 二进制帧 over **TCP** | 下行控制帧；上行遥测/复制/错误帧 | 硬件团队 |
 | **.asc CIR 回放设备** | 出 | `.asc` 文件（PropSim/Spirent 类） | 逐时刻时变复抽头 CIR | 第三方/待定（见《12》） |
 | **RF 前端** | 出/入 | 经协议透传子帧（ID30/35）中继串口 | 控频/衰减/偏置字符串 | 硬件团队 |
@@ -97,7 +97,7 @@
 ## 8. 开放问题
 
 1. `.asc` 回放设备的确切型号/格式版本（PropSim GCM？Spirent？RF-SoC 自身 CIR 模式？）→《12》。
-2. ChannelEgine 集成形态：同进程库调用，还是独立服务/子进程？（影响部署与依赖，见《03》《07》）。
+2. ~~ChannelEgine 集成形态~~ → **已定：微服务**（RPC/REST，经 `ChannelEngineClient`）；传输/序列化选型见《07》。
 3. 遥测订阅对外形态：REST 轮询、SSE、还是 gRPC 流？（P2 定，见《04》）。
 
 ---

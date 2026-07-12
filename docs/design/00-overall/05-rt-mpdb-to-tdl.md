@@ -18,10 +18,9 @@
 
 - **LINK 表**：`TX, RX, TX_ANT_POSITION(x,y,z), RX_ANT_POSITION(x,y,z)`。
 - **CHANNEL 表**（每行一条径）：`LINK_ID, DELAY[s], H[复], AOA, ZOA, AOD, ZOD[deg], CHANNEL_TYPE(0=LoS)`。
-- **接入方式**（二选一，见《12》待定）：
-  - Python API：`from HyperRT.MiRT.MPDB import MPDB; MPDB.load(path)`（依赖 HyperRT SDK + PyTorch）。
-  - MPQL 导出 CSV：`./HyperRT -m ...MPQL --db x.mpdb -e "SELECT ... WRITE_CSV(...)"` → 平台读 CSV（解耦 SDK）。
-- `mpdb_reader`（L1）抽象上述差异，产出与来源无关的**原始径表**。
+- **接入方式（已定）**：**HyperRT 直接导入，无中间件**——`mpdb_reader` 直接 `from HyperRT.MiRT.MPDB import MPDB; MPDB.load(path)`（依赖 HyperRT SDK + PyTorch）。**不采用** MPQL 导出 CSV 的解耦路径。
+- 依赖后果：导入侧引入 HyperRT SDK + PyTorch（可置于独立导入进程隔离，见《03》§6、《09》）。
+- `mpdb_reader`（L1）产出与来源无关的**原始径表**，供上层复用。
 
 ---
 
@@ -115,8 +114,8 @@ def import_mpdb_to_canonical(source, array_geometry, cfg) -> CanonicalChannelMod
 ---
 
 ## 7. 开放问题
-1. MPDB 接入方式（SDK 直读 vs MPQL 导出 CSV）——依赖与部署权衡，见《12》。
-2. LINK→信道对（input,output）的映射规则：取决于天线阵列与栅格如何对应（与《06》阵列映射共用定义）。
+1. ~~MPDB 接入方式~~ → **已定：HyperRT 直连（无中间件）**（见 §2、《12》#4）。
+2. LINK→信道对（input,output）的映射规则（**重要设计**）：取决于天线阵列与栅格如何对应；本期**留给本模块 M4 完善**（与《06》§6 阵列映射共用 `map_links_to_channel_pairs`，《12》#6）。
 3. 交叉极化（H 的极化分量 / VV,VH,HV,HH）在 canonical model 的表示与设备可承载度。
 
 ## 8. 本篇验收

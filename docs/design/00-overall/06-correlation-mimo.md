@@ -78,13 +78,15 @@ for (tx_m, rx_n) in antenna_pairs:                # 映射到栅格 (input,outpu
 
 ---
 
-## 4. A 档（预留）：时变 CIR 注入
+## 4. A 档（预留）：时变相干矩阵输入 → RF-SoC CIR 回放模式
 
-- **数据已就绪**：ChannelEgine 已能产出带 38.901 空间相关的**逐时刻时变 CIR**（`.asc`：N 个 CIR × T 抽头 + 更新率）。
-- **落地路径两条**：
-  1. **AscCirBackend**：直接把 time_varying 的 canonical model 渲染为 `.asc`，交 CIR 回放设备（PropSim/Spirent 或 RF-SoC 的 CIR 模式）——**若目标设备吃 `.asc`，A 档即刻可达**。
-  2. **RF-SoC 专用 CIR 帧**：若 RF-SoC 提供"时变抽头/相干种子流式注入"能力（协议 V3.0 未暴露，**待硬件确认**），则经扩展帧注入。
-- 二者都消费 canonical model 的 `time.mode=time_varying` + `cir`，策略接口与 B 档统一。
+**设计方向（已定）**：A 档按**时变相干（相关）矩阵输入**设计，目标设备 = **RF-SoC 自身的 CIR 回放模式**（非 PropSim/Spirent）；`.asc` 作为**预留接口/格式载体**。
+
+- **数据已就绪**：ChannelEgine 已能产出带 38.901 空间相关的**逐时刻时变 CIR**（`.asc`：N 个 CIR × T 抽头 + 更新率），即 A 档所需的相干时变矩阵序列。
+- **落地路径**：
+  1. **主路径**：canonical model（`time.mode=time_varying` + `cir`）→ **RF-SoC CIR 回放模式**（经其 CIR 注入帧）。⚠️ 该注入帧/接口协议 V3.0 未暴露，是 A 档唯一硬门槛（《12》#1，**待硬件确认**）。
+  2. **预留接口**：AscCirBackend 把同一 time_varying 模型渲染为 `.asc`，作为 RF-SoC CIR 模式的输入格式载体 / 离线交换。
+- 两路都消费 canonical model 的 `time.mode=time_varying` + `cir`，策略接口与 B 档统一；硬件确认前守卫拒绝 `correlation.mode=A` 实际下发。
 
 ---
 
@@ -116,11 +118,35 @@ class ATimeVaryingSynthesizer:      # 预留：§4
 
 ---
 
+## 6bis. B 方案端到端完整流程（首实现基线）
+
+`time.mode = static`（准静态）。目标：一条 MPDB 链路 → 8×8 栅格 MIMO（每信道 ≤24 径），几何空间相关精确复现、衰落边缘统计匹配、下发 RF-SoC。
+
+| Phase | 层 | 动作 | 要点 |
+| :-- | :-- | :-- | :-- |
+| 0 输入 | — | MPDB(HyperRT 直连) + 阵列几何 {p_tx,m}/{p_rx,n}+端口映射 + 配置(fc→λ, max_paths≤24, power_mode, 可选速度, mode=B) | 端口映射见 §6（归 M4） |
+| 1 归一 | L1 | `delay_ns=DELAY×1e9`；`el=90°−zenith`(收发各一)；方位角保留；`λ=c/fc` | 唯一换算处 |
+| 2 导向相位 | L3 | 逐阵元对 (m,n) 逐径 k：`h_{mn,k}=H_k·exp(j2π/λ·p_tx,m·k̂_dep,k)·exp(−j2π/λ·p_rx,n·k̂_arr,k)` | **★先导向、后合并**：顺序反了丢角度、破坏相关 |
+| 3 TDL | L3 | 逐信道对：`delay_code=round(delay_ns/(1000/120))`裁剪 0..1050；同 bin 复增益相干叠加 `Σh_{mn,k}`；选最强 ≤24 径按时延排序 | 复用 `tdl.py` 量化—合并—选径 |
+| 4 归一化 | L3 | 用**整个 MIMO 系统的共享参考**（如最强信道对最强径）归一：`amp=|h|/ref`、`phase=arg(h)` | **★共享基准**：现 tdl.py 逐信道自归一，B 必须改共享基准，否则信道间相对功率被抹平、相关失真 |
+| 5 相关+损伤 | L3 | `R_tx=Σ P_k a_tx a_txᴴ`，`R_rx=Σ P_k a_rx a_rxᴴ`，`R=R_tx⊗R_rx`（存 correlation，供 §8 核验/GUI）；多普勒可选 `f_d=(v·k̂_arr)/λ`（默认 0）；可选瑞利谱形（ID6，边缘统计） | 瑞利跨支路瞬时相关不还原（诚实边界）；按《12》#2 补偿功率 |
+| 6 装配 | L3 | canonical：`time.static`、grid、`channels[(in,out)].taps[]={delay_code,amp_code,phase_code,doppler?,rayleigh_spec?}`、`correlation=R` | — |
+| 7 渲染下发 | L2/L1 | RESET→回传→GLOBAL/OUTPUT_ENABLE→OUTPUT_ATTEN→AWGN→清 24 径→逐径 ENABLE/DELAY/ATTEN/PHASE(/DOPPLER)(/瑞利)；分帧≤4000B；TCP→复制帧比对→遥测→commit/rollback | 分帧多帧语义《12》#5 |
+| 8 校验 | — | dry-run 黄金对比；由已配 amp/phase 反构 `Ĥ_MIMO`→算 `R̂`→对比 R；遥测无 ADC 过载/合路溢出 | 相关保真度量 |
+
+**三条不可违背的正确性要点**（传导到 M4/M5 实现）：
+1. **先施加导向相位、再做时延合并**（Phase 2 先于 Phase 3）。
+2. **全系统共享归一化基准**（Phase 4），非逐信道自归一——否则信道间相对功率失真、相关被抹平。
+3. **诚实边界**：确定性/几何分量对 RT 快照是真值；叠加独立瑞利后，跨支路**瞬时**相关退化为统计等效。
+
+---
+
 ## 7. 开放问题（头号风险，详见《12》）
-1. **A 档可行性**：RF-SoC 是否支持时变 CIR/抽头流式注入？（决定 A 档能否经 RF-SoC 而非仅 `.asc`）。
-2. **ID6 谱系数精确语义**：256 复数 ↔ 多普勒谱/最大多普勒的映射；启用瑞利后功率下降量的定标补偿。
-3. **Kronecker vs 全相关**：可分离近似是否满足精度要求；非可分离场景是否需要。
-4. **交叉极化**：H 的极化维（VV/VH/HV/HH）如何进入相关与设备。
+1. **A 档硬门槛**：RF-SoC CIR 回放模式的**注入帧/接口是否存在**（方向已定为 RF-SoC CIR 模式 + `.asc` 预留，见 §4、《12》#1，**待硬件确认**）。
+2. **ID6 谱系数精确语义**：256 复数 ↔ 多普勒谱/最大多普勒的映射；瑞利功率下降**机理已明**、确切标定值待硬件（《12》#2）。
+3. **阵列↔栅格映射**：重要设计，归 M4 完善（§6、《12》#6）。
+4. **Kronecker vs 全相关**：可分离近似是否满足精度要求；非可分离场景是否需要。
+5. **交叉极化**：H 的极化维（VV/VH/HV/HH）如何进入相关与设备。
 
 ## 8. 本篇验收
 - B 档：MPDB 角度 → R → 确定性权重，一条 MIMO 链路可复现几何空间相关（可对 R 做数值核验）。

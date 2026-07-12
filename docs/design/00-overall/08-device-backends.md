@@ -11,7 +11,7 @@
 L2 用 **`DeviceBackend` 抽象**承载"多后端"：同一 canonical model 可渲染并下发到不同类型的信道仿真设备。本期两个实现：
 
 - **`RFSoCBackend`**：协议 V3.0 二进制帧，over **TCP**。
-- **`AscCirBackend`**：时变 CIR → `.asc` 文件（PropSim/Spirent 类，或 RF-SoC CIR 模式）。
+- **`AscCirBackend`**：时变 CIR → `.asc` 文件，目标 = **RF-SoC 自身 CIR 回放模式**（已定，非 PropSim/Spirent）。
 
 ---
 
@@ -62,7 +62,7 @@ render → connect(TCP) → [tx: RESET] → [tx: 清 24 径]
 
 ### 4.1 职责
 - canonical model（`time.mode=time_varying` + `cir`，或由 taps 采样生成）→ `.asc` 文件。
-- 承载 **A 档**数据（逐时刻相干 CIR）。
+- 承载 **A 档**数据（逐时刻相干 CIR），作为 **RF-SoC CIR 回放模式**的输入格式载体。
 
 ### 4.2 .asc 格式（据 ChannelEgine 样例）
 ```
@@ -97,7 +97,7 @@ render → connect(TCP) → [tx: RESET] → [tx: 清 24 径]
 ---
 
 ## 7. 开放问题
-1. `.asc` 目标设备与格式版本（PropSim GCM / Spirent / RF-SoC CIR 模式）——《12》。
+1. ~~`.asc` 目标设备~~ → **已定：RF-SoC CIR 回放模式**；仍需锁定该模式对 `.asc`/CIR 帧的确切接收字段（并入《12》#1 硬件确认）。
 2. RFSoCBackend 事务边界与分帧策略归属 L2 还是 L3（与《11》协同）。
 3. 时变模型下发到 RFSoC（逐快照流式）的可行性与节奏（依赖硬件，A 档）。
 

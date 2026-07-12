@@ -36,7 +36,7 @@
 
 | 资源 | 方法 | 说明 |
 | :--- | :--- | :--- |
-| `/devices` `/devices/{id}` | GET | 设备列表/详情/健康（多设备预留，单机默认单设备） |
+| `/devices` `/devices/{id}` | GET；POST/DELETE（**P4 多设备阶段启用**） | 设备列表/详情/健康；设备注册/注销（多设备预留《T1-10》；单机默认单设备，注册端点不启用） |
 | `/imports` | POST | 提交 MPDB 导入任务（异步）→ 返回 job |
 | `/imports/{job}` | GET | 导入进度/结果（canonical model 句柄） |
 | `/scenarios` | GET/POST | 场景（统计信道参数或导入结果）的 CRUD、版本化 |

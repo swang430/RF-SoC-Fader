@@ -86,9 +86,9 @@ for (tx_m, rx_n) in antenna_pairs:                # 映射到栅格 (input,outpu
 
 - **数据已就绪**：ChannelEgine 已能产出带 38.901 空间相关的**逐时刻时变 CIR**（`.asc`：N 个 CIR × T 抽头 + 更新率），即 A 档所需的相干时变矩阵序列。
 - **落地路径**：
-  1. **主路径**：canonical model（`time.mode=time_varying` + `cir`）→ **RF-SoC CIR 回放模式**（经其 CIR 注入帧）。⚠️ 该注入帧/接口协议 V3.0 未暴露，是 A 档唯一硬门槛（《12》#1，**待硬件确认**）。
+  1. **主路径**：canonical model（`time.mode=time_varying` + CIR 载荷 `gain_series`/`cir_ref`，《03c》§5.2）→ **RF-SoC CIR 回放模式**（经其 CIR 注入帧）。⚠️ 该注入帧/接口协议 V3.0 未暴露，是 A 档唯一硬门槛（《12》#1，**待硬件确认**）。
   2. **预留接口**：AscCirBackend 把同一 time_varying 模型渲染为 `.asc`，作为 RF-SoC CIR 模式的输入格式载体 / 离线交换。
-- 两路都消费 canonical model 的 `time.mode=time_varying` + `cir`，策略接口与 B 档统一；硬件确认前守卫拒绝 `correlation.mode=A` 实际下发。
+- 两路都消费 canonical model 的 `time.mode=time_varying` + CIR 载荷（`gain_series` 内联 / `cir_ref` 外置），策略接口与 B 档统一；硬件确认前守卫拒绝 `correlation.mode=A` 实际下发。
 
 ---
 
@@ -104,7 +104,7 @@ class BStatisticalSynthesizer:      # 默认：§2/§3
     ...
 
 class ATimeVaryingSynthesizer:      # 预留：§4
-    # 消费/生成 time_varying + cir；交 AscCirBackend 或 RF-SoC CIR 帧
+    # 消费/生成 time_varying + CIR 载荷(gain_series/cir_ref)；交 AscCirBackend 或 RF-SoC CIR 帧
     ...
 ```
 - 选择由场景配置 `correlation.mode = B|A` 决定；A 在硬件确认前不启用（守卫报错，见《12》）。

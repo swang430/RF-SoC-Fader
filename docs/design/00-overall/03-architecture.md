@@ -105,15 +105,16 @@ CanonicalChannelModel
 │   ├── taps[]:   每径 { delay_s, gain_complex, doppler_hz, rayleigh_spec?, phase }
 │   │             （time_varying 时，taps 可为随 time.snapshots 变化的序列）
 │   ├── corr:     该信道对相关性元数据（角度、导向矢量、R 的引用）
-│   └── cir?:     可选的时变 CIR 序列（A 档 / .asc 后端使用；隶属 time 轴）
+│   └── CIR 载荷: time_varying 时经 taps[].gain_series(内联) 或
+│                 cir_ref(外置>10MB) 承载（A 档，字段定义见《03c》§5.2）
 ├── correlation:  全局/分组相关矩阵 R（R_tx, R_rx, Kronecker 组合）
 └── impairments:  AWGN、输出衰减、扫频、信号源等设备无关的损伤描述
 ```
 
 **设计要点**：
-- **时间轴是一等但可选维度**：默认 `static` 单快照，常见场景零额外复杂度；`time_varying` 承载 A 档时变 CIR、移动性与多普勒演化，`cir` 与时变 taps 都挂在此轴下。上游 ChannelEgine 的 `.asc`（多 CIR 时序）天然映射到 `time_varying`。
-- **两条上游源都必须能产出它**：MPDB 导入产 taps+角度+corr（默认 static）；ChannelEgine 产 taps/cir+38.901 相关（可 time_varying）。
-- **两个下游后端都只依赖它**：RFSoCBackend 读 taps+impairments 组帧（static 或逐快照）；AscCirBackend 读 cir/taps 渲染 `.asc`。
+- **时间轴是一等但可选维度**：默认 `static` 单快照，常见场景零额外复杂度；`time_varying` 承载 A 档时变 CIR、移动性与多普勒演化，CIR 载荷（`gain_series`/`cir_ref`）挂在此轴下。上游 ChannelEgine 的 `.asc`（多 CIR 时序）天然映射到 `time_varying`。
+- **两条上游源都必须能产出它**：MPDB 导入产 taps+角度+corr（默认 static）；ChannelEgine 产 taps/CIR 载荷+38.901 相关（可 time_varying）。
+- **两个下游后端都只依赖它**：RFSoCBackend 读 taps+impairments 组帧（static 或逐快照）；AscCirBackend 读 CIR 载荷（`gain_series`/`cir_ref`）渲染 `.asc`。
 - **相关性是模型的一等属性**，不是后端临时算的——保证多后端一致。
 - 改此契约需同步 L3 生产方与 L2 消费方及测试（沿用现有「DataFrame 是接口」的纪律，升级为结构化模型）。
 

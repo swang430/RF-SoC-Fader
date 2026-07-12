@@ -64,7 +64,7 @@ render → connect(TCP) → [tx: RESET] → [tx: 清 24 径]
 ## 4. AscCirBackend（时变 CIR → .asc）
 
 ### 4.1 职责
-- canonical model（`time.mode=time_varying` + `cir`，或由 taps 采样生成）→ `.asc` 文件。
+- canonical model（`time.mode=time_varying` + CIR 载荷 `gain_series`/`cir_ref`（《03c》§5.2），或由 static taps 采样生成）→ `.asc` 文件。
 - 承载 **A 档**数据（逐时刻相干 CIR），作为 **RF-SoC CIR 回放模式**的输入格式载体。
 
 ### 4.2 .asc 格式（据 ChannelEgine 样例）

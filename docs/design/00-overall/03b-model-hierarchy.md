@@ -110,6 +110,7 @@ CanonicalChannelModel {
 ```
 - 一个模型对象在**退化链上前进**时更新 `level` 与 `payload`；退化算子是 `level_i → level_{i+1}` 的纯变换。
 - 下游后端按 `capabilities` 要求的层级消费（TDL 面要 `level=TDL`；CIR 面要 `realization=CIR`）。
+- **字段级规范（各 level 的 payload 精确结构、类型、单位）见《03c-channel-schema》**。
 
 ---
 

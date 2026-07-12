@@ -50,7 +50,7 @@
 - **protocol**：协议 V3.0 全 35 参数 ID 编码 + 帧封装；**新增** 4 类下行帧（遥测/复制/错误/透传）解码；单位换算（延迟/幅度/相位/多普勒/AWGN）。
 - **asc_codec**：`.asc` 时变 CIR 读写（header + tap data）。
 - **mpdb_reader**：MPDB 读取（Python API 或 MPQL 导出）→ 原始径表（角度/H/时延/坐标）。
-- **单位/坐标换算**：s↔ns、Zenith↔Elevation、物理量↔协议码值——**唯一定义处**。
+- **单位/坐标换算**：s↔ns、物理量↔协议码值、（消费者侧）天顶↔仰角——**唯一定义处**。canonical 统一用天顶角（《03c》）。
 - **边界**：不碰网络、不碰文件传输、不含业务编排；输入输出皆为纯数据。100% 单测覆盖。
 - **现状**：现 `channel_simulator/protocol.py` 是其雏形（13/35 ID，无下行解码）。
 
@@ -87,6 +87,8 @@
 与设备无关的信道描述，是 L3 的产物、L2 的输入。概念结构（最终形态见第二册 M3）：
 
 > **模型层级是一等属性**：canonical model 带 `level`（RT/GCM/CDL/TDL）与正交的 `realization`（CIR），沿退化链前进。层级/退化/实现面的完整顶层设计见 **《03b-model-hierarchy》**（用户可在任一层输入，平台退化到硬件能实现的层级）。
+>
+> **字段级规范见 《03c-channel-schema》**（规范性契约：类型/单位/范围/各 level payload/序列化/版本，及 MPDB↔schema 映射）。下方为概念轮廓。
 
 ```
 CanonicalChannelModel

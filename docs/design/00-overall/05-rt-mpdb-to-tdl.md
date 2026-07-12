@@ -33,11 +33,11 @@ def import_mpdb_to_canonical(source, array_geometry, cfg) -> CanonicalChannelMod
     # 1. 读取（L1 mpdb_reader）
     links, rays = mpdb_reader.load(source)      # rays: LINK_ID,DELAY,H,AOA,ZOA,AOD,ZOD,TYPE
 
-    # 2. 单位/坐标归一（L1，唯一定义处）
-    rays.delay_ns   = rays.DELAY * 1e9          # s → ns
-    rays.el_arr     = 90 - rays.ZOA             # Zenith → Elevation
-    rays.el_dep     = 90 - rays.ZOD
-    #   方位角 AOA/AOD 直接保留；H 为复增益（幅度+相位）
+    # 2. 单位归一（L1，唯一定义处）
+    rays.delay_ns   = rays.DELAY * 1e9          # s → ns（渲染时再量化到码值）
+    #   角度：canonical 保留【天顶角 θ】(与 MPDB/3GPP 一致，见《03c》)；
+    #        方位角 AOA/AOD 直接保留；H 为复增益。
+    #        仰角转换 el=90°−θ 延后到需要它的消费者（如 .asc 导出），不在此处做。
 
     model = CanonicalChannelModel(meta=..., time=Static(), grid=cfg.grid)
 

@@ -143,6 +143,7 @@ Tap {
   gain         : Complex          # 几何/确定性权重后的复增益（B 档核心产物）
   power_linear : float
   doppler_hz   : float
+  xpr_db?      : float            # 交叉极化比（传导测试的极化参数，硬件消费）
   rayleigh_spec? : RayleighSpec   # 衰落边缘统计（多普勒谱，ID6）
   angles?      : { aoa_az_deg, aoa_zen_deg, aod_az_deg, aod_zen_deg }  # 保留供核验/再退化
 }
@@ -162,6 +163,16 @@ RayleighSpec {
 - **天线极化**存于 `AntennaArray.polarization.slant_deg`（斜极化角 ζ）：`0=V`、`90=H`、**`±45=斜 45°双极化**（基站常用）。
 - **逐端口增益**在退化/渲染时由「信道 `PolMatrix` **投影**到收发天线的 slant 基」得到：`h_port = e_rx(ζ_rx)ᵀ · PolMatrix · e_tx(ζ_tx)`，其中 `e(ζ)=[cosζ, sinζ]ᵀ`。斜 45° 即 `ζ=±45°`。
 - 单极化场景：`slant_deg=[0]` 且 `gain` 用标量 `Complex`（PolMatrix 退化为 VV）。
+
+**极化的设备消费——按测试模式分叉（已定，硬件确认）**：
+
+| 测试模式 | 设备如何处理极化 | schema 渲染 |
+| :-- | :-- | :-- |
+| **传导 (conducted)** | **只需 XPR 标量，硬件支持** | 模型极化（PolMatrix/slant）归约为 `xpr_db`（每径/每模型）下发；不需双端口 |
+| **OTA** | 两个极化分支**分开独立处理** | 每个极化分支映射为设备栅格上的**独立信道**，各自渲染（`port_map` 为每极化分配独立端口，归 M4） |
+
+- `PolMatrix`/`slant_deg` 是**模型层**的完整极化表示（源侧、设备无关）；`xpr_db` 是它在**传导渲染**时的归约产物。
+- OTA 模式下不归约为 XPR，而是走多信道独立映射——这是 `port_map`/栅格设计（M4）要承载的一个维度。
 
 ### 5.4 3GPP CDL/TDL 表的 JSON 表示（level=CDL/TDL 入口）
 
@@ -288,7 +299,7 @@ Provenance {
 ---
 
 ## 12. 开放问题（schema 待钉项）
-1. ~~极化深度~~ → **已定**：`PolMatrix`(V/H 场基) + 天线 `slant_deg`(含斜 **±45°**)，投影得逐端口增益（§5.3）；单极化用标量 `gain`。仍需确认**设备对极化/双端口的承载度**（硬件，与《05》《06》交叉极化项合并）。
+1. ~~极化深度 / 设备承载度~~ → **已定（硬件确认）**：模型层用 `PolMatrix`(V/H 场基) + 天线 `slant_deg`(含斜 **±45°**)；**设备消费按测试模式分叉**——**传导只需 XPR 标量（硬件支持）**，**OTA 分极化独立信道**（§5.3）。OTA 的每极化端口映射归 M4。
 2. ~~CDL/TDL 表格式~~ → **已定**：自定义 JSON 体现 3GPP 表（§5.4），`cdl_tdl_reader` 解析。
 3. **复数序列化表示**（`{re,im}` vs `[re,im]` vs 字符串）——建议批量抽头用 `[re,im]`、顶层字段用对象；M10 定死。
 4. **time_varying CIR 的外置存储**边界（多大走 blob；schema 同时支持内联与引用）——M10。

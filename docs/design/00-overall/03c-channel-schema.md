@@ -134,13 +134,15 @@ PolMatrix { vv:Complex, vh:Complex, hv:Complex, hh:Complex }   # 极化 2×2（V
 ### 5.2 Channel（level = TDL，设备信道对索引）
 ```
 Channel {
-  addr  : { device_id?: string, input: int(0..7), output: int(0..7) }
-  taps  : Tap[]           # ≤24
+  addr    : { device_id?: string, input: int(0..7), output: int(0..7) }
+  taps    : Tap[]           # ≤24（time.mode=static 或 time_varying 内联）
+  cir_ref? : BlobRef        # time_varying 且 >10MB：外置 CIR 引用（替代内联 gain_series，见 §7/§10）
 }
 
 Tap {
   delay_s      : float
-  gain         : Complex          # 几何/确定性权重后的复增益（B 档核心产物）
+  gain         : Complex          # static：几何/确定性权重后的复增益（B 档核心产物）
+  gain_series? : Complex[n_snapshots]  # time_varying 内联：逐时刻增益（隶属 time.snapshots；与 gain 互斥）
   power_linear : float
   doppler_hz   : float
   xpr_db?      : float            # 交叉极化比（传导测试的极化参数，硬件消费）
@@ -154,8 +156,11 @@ RayleighSpec {
   max_doppler_hz   : float
   coeffs?          : Complex[256]   # 频域滤波系数（可由 spectrum+max_doppler 生成）
 }
+
+BlobRef { uri: string, format: string, shape: int[], dtype: string }   # 外置 CIR 句柄
 ```
 > `phase` 不单列：相位即 `gain` 的辐角（`arg(gain)`）；渲染到协议时再拆出 `phase_code`。
+> **CIR 承载（time_varying）**：内联走 `Tap.gain_series`（`gain` 与 `gain_series` 二选一，由 `time.mode` 决定）；序列化 >10 MB 时改用 `Channel.cir_ref`（外置 blob，`gain_series` 置空）。见 §7/§10。
 
 ### 5.3 极化模型（含斜 45°）
 

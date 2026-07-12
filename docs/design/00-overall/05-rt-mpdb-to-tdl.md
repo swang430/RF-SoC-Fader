@@ -110,7 +110,7 @@ def import_mpdb_to_canonical(source, array_geometry, cfg) -> CanonicalChannelMod
 - **schema 校验**：MPDB 必需列存在、类型正确；缺列/空表 → 明确错误。
 - **范围裁剪**：时延超 `0..1050` 的径丢弃并计数上报（不静默）。
 - **退化保护**：全被过滤 → 报「无有效径」而非产空模型（沿用现有 `ValueError` 风格）。
-- **单位/坐标**：Zenith/Elevation、s/ns 只在导入边界换算一次，杜绝重复换算。
+- **单位/坐标**：canonical 保留天顶角 θ（《03c》）；s→ns 在导入边界换算一次；仰角换算延后到需要它的消费者（如 `.asc` 导出），只换一次，杜绝重复换算。
 - **可复现**：导入配置（power_mode、max_paths、多普勒策略、阵列几何）随 scenario 持久化。
 
 ---

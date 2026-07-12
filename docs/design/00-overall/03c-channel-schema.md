@@ -229,7 +229,8 @@ TimeAxis {
 }
 ```
 - `static`（B 档默认）：`channels[].taps[].gain` 为标量复数。
-- `time_varying`（A 档 / 移动性）：抽头增益随 `snapshots` 变化——`realization=CIR`，抽头增益为**随时刻的复序列**（`gain_series : Complex[n_snapshots]`），对应 `.asc` 的逐时刻 tap 数据。大体量可外置 blob 引用。
+- `time_varying`（A 档 / 移动性）：抽头增益随 `snapshots` 变化——`realization=CIR`，抽头增益为**随时刻的复序列**（`gain_series : Complex[n_snapshots]`），对应 `.asc` 的逐时刻 tap 数据。
+- **内联 vs 外置（阈值 = 10 MB）**：序列化后 **≤10 MB 内联**进 JSON；**>10 MB 外置** blob（JSON 只存元数据 + 引用句柄）。见 §10。
 
 ---
 
@@ -281,7 +282,7 @@ Provenance {
 
 - **JSON** 为规范序列化；复数以 `{re, im}` 或 `[re, im]`（择一固定，M10 定）。
 - `schema_version` 语义化；破坏性变更升主版本，对外 API 契约随之（《04》§7）。
-- **大体量**（time_varying CIR、256 系数×多径×多信道）支持**外置引用**（blob 句柄），JSON 只存元数据 + 引用。
+- **大体量**（time_varying CIR、256 系数×多径×多信道）支持**外置引用**（blob 句柄），JSON 只存元数据 + 引用。**阈值 = 10 MB**（已定）：序列化 ≤10 MB 内联，>10 MB 外置 blob。blob 格式（.npy/二进制）由 M10 定。
 - 可序列化 ⇒ 配置即数据、可版本化、可重放（《11》§5、文件 I/O《11》§6、格式细节 M10）。
 
 ---
@@ -302,7 +303,7 @@ Provenance {
 1. ~~极化深度 / 设备承载度~~ → **已定（硬件确认）**：模型层用 `PolMatrix`(V/H 场基) + 天线 `slant_deg`(含斜 **±45°**)；**设备消费按测试模式分叉**——**传导只需 XPR 标量（硬件支持）**，**OTA 分极化独立信道**（§5.3）。OTA 的每极化端口映射归 M4。
 2. ~~CDL/TDL 表格式~~ → **已定**：自定义 JSON 体现 3GPP 表（§5.4），`cdl_tdl_reader` 解析。
 3. **复数序列化表示**（`{re,im}` vs `[re,im]` vs 字符串）——建议批量抽头用 `[re,im]`、顶层字段用对象；M10 定死。
-4. **time_varying CIR 的外置存储**边界（多大走 blob；schema 同时支持内联与引用）——M10。
+4. ~~CIR 外置存储边界~~ → **已定：10 MB**（序列化 ≤10 MB 内联，>10 MB 外置 blob，§7/§10）；blob 格式归 M10。
 5. `port_map`（阵元↔端口）规则——归 M4（重要设计）。
 
 ## 13. 本篇验收

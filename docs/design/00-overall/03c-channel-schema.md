@@ -80,9 +80,15 @@ Meta {
 AntennaArray {
   n_elements  : int
   positions_m : float[n_elements][3]   # 阵元坐标(米，本地或世界)
-  polarization? : string | PolConfig   # 极化配置（可选）
+  polarization : PolConfig             # 极化配置（含斜极化角）
   orientation?  : float[3]             # 阵列朝向（可选）
   port_map    : int[n_elements]        # ★ 阵元 ↔ 设备端口(0..7) 映射
+}
+
+PolConfig {
+  # 每个极化端口的斜极化角 ζ（度，相对垂直）：
+  #   0=垂直(V)  90=水平(H)  +45/−45=斜 45°双极化(基站常用)
+  slant_deg : float[]        # 如 [+45,-45] 双斜极化 · [0,90] 交叉 V/H · [0] 单垂直
 }
 ```
 > `port_map`（阵元↔栅格端口）是 MIMO 保真的**重要设计**，规则细化归 M4（见《03b》§4、《12》#6）。schema 只规定它**在此承载**。
@@ -122,7 +128,7 @@ Cluster {                               # GCM / CDL 层
   rays?         : Ray[]                 # 簇内子径（可选，展开时）
 }
 
-PolMatrix { vv:Complex, vh:Complex, hv:Complex, hh:Complex }   # 极化 2×2
+PolMatrix { vv:Complex, vh:Complex, hv:Complex, hh:Complex }   # 极化 2×2（V/H 场基）
 ```
 
 ### 5.2 Channel（level = TDL，设备信道对索引）
@@ -149,6 +155,40 @@ RayleighSpec {
 }
 ```
 > `phase` 不单列：相位即 `gain` 的辐角（`arg(gain)`）；渲染到协议时再拆出 `phase_code`。
+
+### 5.3 极化模型（含斜 45°）
+
+- **信道极化耦合**存于 `PolMatrix`（V/H 场基的 2×2：VV/VH/HV/HH）——这是传播信道**本征**的极化响应（3GPP 风格），与天线无关。
+- **天线极化**存于 `AntennaArray.polarization.slant_deg`（斜极化角 ζ）：`0=V`、`90=H`、**`±45=斜 45°双极化**（基站常用）。
+- **逐端口增益**在退化/渲染时由「信道 `PolMatrix` **投影**到收发天线的 slant 基」得到：`h_port = e_rx(ζ_rx)ᵀ · PolMatrix · e_tx(ζ_tx)`，其中 `e(ζ)=[cosζ, sinζ]ᵀ`。斜 45° 即 `ζ=±45°`。
+- 单极化场景：`slant_deg=[0]` 且 `gain` 用标量 `Complex`（PolMatrix 退化为 VV）。
+
+### 5.4 3GPP CDL/TDL 表的 JSON 表示（level=CDL/TDL 入口）
+
+**已定**：CDL/TDL 表输入采用**自定义 JSON 体现 3GPP 表**（不依赖外部格式），映射到本 schema 的 clusters（CDL）/ taps（TDL）。示例：
+
+```jsonc
+// CDL 表（如 CDL-A）→ level=CDL, Environment.links[].clusters[]
+{
+  "model": "CDL-A", "level": "CDL",
+  "spreads_deg": { "c_asd": 5, "c_asa": 11, "c_zsd": 3, "c_zsa": 3 },
+  "xpr_db": 10,
+  "clusters": [
+    // 归一化时延、功率(dB)、离去/到达 方位&天顶角(度)
+    { "delay_norm": 0.0000, "power_db": -13.4, "aod_az": -178.1, "aoa_az": 51.3, "zod": 50.2, "zoa": 125.4 }
+    // …
+  ]
+}
+
+// TDL 表（如 TDL-A）→ level=TDL, channels[].taps[]（无角度，仅时延+功率+谱）
+{
+  "model": "TDL-A", "level": "TDL",
+  "doppler_spectrum": "jakes",
+  "taps": [ { "delay_norm": 0.0000, "power_db": -15.5 } /* … */ ]
+}
+```
+- 归一化时延 × RMS 时延扩展 → `delay_s`；`power_db` → 线性功率；`spreads/xpr` 进 cluster 字段。
+- 由 `cdl_tdl_reader`（L1）解析（格式细节 M10，与《11》§6 文件 I/O 呼应）。
 
 ---
 
@@ -248,10 +288,10 @@ Provenance {
 ---
 
 ## 12. 开放问题（schema 待钉项）
-1. **极化深度**：单极化标量 `gain` vs 2×2 `PolMatrix` 是否本期都要；设备对极化的承载度（与《05》《06》交叉极化开放项合并）。
-2. **CDL/TDL 表输入的确切文件格式**（复用 3GPP 表 / 自定义 JSON）——与《03b》§9、《11》§6、M10。
-3. **复数序列化表示**（`{re,im}` vs `[re,im]` vs 字符串）——M10 定。
-4. **time_varying CIR 的外置存储**边界（多大走 blob）。
+1. ~~极化深度~~ → **已定**：`PolMatrix`(V/H 场基) + 天线 `slant_deg`(含斜 **±45°**)，投影得逐端口增益（§5.3）；单极化用标量 `gain`。仍需确认**设备对极化/双端口的承载度**（硬件，与《05》《06》交叉极化项合并）。
+2. ~~CDL/TDL 表格式~~ → **已定**：自定义 JSON 体现 3GPP 表（§5.4），`cdl_tdl_reader` 解析。
+3. **复数序列化表示**（`{re,im}` vs `[re,im]` vs 字符串）——建议批量抽头用 `[re,im]`、顶层字段用对象；M10 定死。
+4. **time_varying CIR 的外置存储**边界（多大走 blob；schema 同时支持内联与引用）——M10。
 5. `port_map`（阵元↔端口）规则——归 M4（重要设计）。
 
 ## 13. 本篇验收

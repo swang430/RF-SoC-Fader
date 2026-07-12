@@ -14,6 +14,8 @@
 
 **只集成引擎/服务能力，不复用其 GUI**（`gui.py` 弃用，界面全新设计）。
 
+> 层级视角（《03b》）：ChannelEgine 是**在 GCM/CDL 层入口进入退化链**（38.901 统计模型；可产 CDL 定表或时变 CIR）。其产出经 `ChannelEngineClient` 转为 canonical model（`level=GCM|CDL`，或 `realization=CIR`），再由平台退化到目标实现面。
+
 ---
 
 ## 2. 为什么是微服务（回顾 ADR-5）

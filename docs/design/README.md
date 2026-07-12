@@ -9,6 +9,7 @@
 | 01 | [目标、范围与术语](00-overall/01-goals-and-scope.md) | G1–G6 目标、In/Out/Non-Goals、术语表 |
 | 02 | [系统上下文](00-overall/02-system-context.md) | 使用者、外部接口、用例全景、上下文图 |
 | 03 | [分层架构](00-overall/03-architecture.md) | 五层单向依赖、canonical model 枢纽、ADR |
+| 03b | [信道模型层级与退化](00-overall/03b-model-hierarchy.md) | RT⊃GCM⊃CDL⊃TDL 嵌套、退化算子、用户任一层输入 |
 | 04 | [API 策略](00-overall/04-api-strategy.md) | REST 主 + SDK + SCPI，资源模型 |
 | 05 | [RT/MPDB → TDL 导入](00-overall/05-rt-mpdb-to-tdl.md) | 旗舰上半段：MPDB 管线 |
 | 06 | [MIMO 空间相关性](00-overall/06-correlation-mimo.md) | 旗舰下半段：B 档基线 / A 档预留 |

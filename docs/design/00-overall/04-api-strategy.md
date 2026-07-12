@@ -49,6 +49,7 @@
 | `/telemetry/stream` | GET(SSE) | 遥测订阅（SSE；gRPC 流后续可选） |
 
 **约定**：
+- **多层级输入**（《03b》）：`imports`/`scenarios` 带 `level`（RT/GCM/CDL/TDL）声明输入层级；`session` 的实现面（TDL 帧 / CIR）决定平台退化深度。用户可在任一层输入。
 - **长耗时操作异步化**（MPDB 导入、批量下发）：返回 job/session，轮询或订阅。
 - **dry-run**：`apply?dry_run=true` 只产出后端产物（帧/`.asc`）不触设备，便于 CI 与黄金对比。
 - **后端选择**：`session` 绑定 `backend=rfsoc|asc`，同一 scenario 可开两个会话产两种后端产物（G4）。

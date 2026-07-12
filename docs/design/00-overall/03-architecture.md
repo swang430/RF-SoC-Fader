@@ -86,8 +86,13 @@
 
 与设备无关的信道描述，是 L3 的产物、L2 的输入。概念结构（最终形态见第二册 M3）：
 
+> **模型层级是一等属性**：canonical model 带 `level`（RT/GCM/CDL/TDL）与正交的 `realization`（CIR），沿退化链前进。层级/退化/实现面的完整顶层设计见 **《03b-model-hierarchy》**（用户可在任一层输入，平台退化到硬件能实现的层级）。
+
 ```
 CanonicalChannelModel
+├── level:        RT | GCM | CDL | TDL       # ★ 当前表示层级（《03b》）
+├── realization:  none | CIR                 # ★ 正交时变波形实现（.asc / A 档）
+├── payload:      rays | clusters | taps      # 与 level 匹配的载荷
 ├── meta:         载频、带宽、时间基准、坐标/单位约定、来源(RT/38.901)
 ├── time:         ★ 一等但可选的时间轴 { mode: static|time_varying,
 │                   snapshots?: 时刻序列, update_rate?, duration? }
@@ -172,6 +177,7 @@ Client        L4 API        L3 服务                         L2 后端         
 | ADR-5 | 集成 ChannelEgine（**微服务**，不复用其 GUI） | 不重造 38.901；依赖隔离、故障隔离、可独立伸缩；GUI 另设计 | 同进程库调用（PyTorch 依赖污染主进程、耦合升级）；自研引擎（重复造轮子） |
 | ADR-6 | TCP 传输 | 产品形态为以太网；吞吐优于串口 | 串口（带宽不足，64×24+1024B 系数慢） |
 | ADR-7 | canonical model 承载**一等但可选**时间轴 | 同时容纳 static（B 档）与 time_varying（A 档/移动性），常见场景零额外复杂度 | 只做单快照（无法承载 A 档/时变）；时间轴强制必填（常见场景过度复杂） |
+| ADR-8 | **模型层级 + 退化链**作顶层设计（RT⊃GCM⊃CDL⊃TDL），用户任一层输入、平台退化到硬件可实现层级 | 与 3GPP CDL→TDL 推导同构；统一多源/多后端/A·B 档；退化算子可测（《03b》） | 两源扁平汇聚到 TDL（跳过 CDL、退化逻辑埋管线、不可组合复用） |
 
 ---
 

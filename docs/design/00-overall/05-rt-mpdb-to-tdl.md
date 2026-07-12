@@ -12,6 +12,8 @@
 
 输入：MPDB（HyperRT）；输出：canonical model（`time.mode` 默认 static，taps + 角度元数据）。**不支持 .mat**。
 
+> 层级视角（《03b》）：MPDB 导入是**在 RT 层入口进入退化链**，本篇管线执行 RT→(CDL)→TDL 的退化，落到参数化 TDL 面。用户亦可在 GCM/CDL/TDL 层直接输入（《03b》§4）。
+
 ---
 
 ## 2. 输入契约：MPDB（见《MPDB接口的使用.md》）

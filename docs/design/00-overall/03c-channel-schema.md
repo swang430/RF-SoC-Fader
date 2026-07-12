@@ -141,8 +141,10 @@ Channel {
 
 Tap {
   delay_s      : float
-  gain         : Complex          # static：几何/确定性权重后的复增益（B 档核心产物）
-  gain_series? : Complex[n_snapshots]  # time_varying 内联：逐时刻增益（隶属 time.snapshots；与 gain 互斥）
+  gain?        : Complex          # static：几何/确定性权重后的复增益（B 档核心产物）
+  gain_series? : Complex[n_snapshots]  # time_varying 内联：逐时刻增益（隶属 time.snapshots）
+  # 约束：gain / gain_series / Channel.cir_ref 三者按 time.mode 恰取其一——
+  #   static → 必填 gain；time_varying ≤10MB → 必填 gain_series；>10MB → Channel.cir_ref
   power_linear : float
   doppler_hz   : float
   xpr_db?      : float            # 交叉极化比（传导测试的极化参数，硬件消费）
@@ -160,7 +162,7 @@ RayleighSpec {
 BlobRef { uri: string, format: string, shape: int[], dtype: string }   # 外置 CIR 句柄
 ```
 > `phase` 不单列：相位即 `gain` 的辐角（`arg(gain)`）；渲染到协议时再拆出 `phase_code`。
-> **CIR 承载（time_varying）**：内联走 `Tap.gain_series`（`gain` 与 `gain_series` 二选一，由 `time.mode` 决定）；序列化 >10 MB 时改用 `Channel.cir_ref`（外置 blob，`gain_series` 置空）。见 §7/§10。
+> **CIR 承载（time_varying）**：内联走 `Tap.gain_series`；序列化 >10 MB 时改用 `Channel.cir_ref`（外置 blob，`gain_series` 置空）。`gain`/`gain_series`/`cir_ref` 按 `time.mode` **恰取其一**（`gain` 对 static 必填、对 time_varying 不出现）。见 §7/§10。
 
 ### 5.3 极化模型（含斜 45°）
 

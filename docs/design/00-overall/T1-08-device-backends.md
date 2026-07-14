@@ -11,7 +11,7 @@
 L2 用 **`DeviceBackend` 抽象**承载"多后端"：同一 canonical model 可渲染并下发到不同类型的信道仿真设备。本期两个实现：
 
 - **`RFSoCBackend`**：协议 V3.0 二进制帧，over **TCP**。
-- **`AscCirBackend`**：时变 CIR → `.asc` 文件，目标 = **RF-SoC 自身 CIR 回放模式**（已定，非 PropSim/Spirent）。
+- **`AscCirBackend`**：时变 CIR → `.asc` 文件（**通用 CIR 交换/导出格式**：离线分析、第三方 fader、未来支持 CIR 的设备——当前 RF-SoC 无 CIR 回放模式，《12》#1/#3）。
 
 ---
 
@@ -41,7 +41,7 @@ class DeviceBackend(Protocol):
 - canonical model（static 或逐快照）→ 子帧序列 → 控制帧（复用/扩展 `commands.py` + `protocol.py`）。
 - **TCP 传输**：连接管理、心跳、重连（找回重构丢失的下发能力，从串口升级为 TCP）。
 - **事务化下发**：先 reset → 清 24 径 → 逐径写 → 复制帧比对 → 遥测确认；失败回滚（见《11》）。
-- **分帧**：payload > 4000B 上限时拆多帧（64×24×多参数 + 1024B 瑞利系数）。
+- **帧预算切分**：设备**不支持多帧关联语义**（2026-07-14 硬件确认，《12》#5）——每帧自包含且 ≤4000B；大配置拆为**多个独立帧顺序下发**（每帧自洽，「清径+写径」等关键配对不跨帧），无跨帧原子性，事务由上位机补偿（《11》§1）；切分细则归 M2。
 - **下行帧解码**：遥测（131B）、复制回显、错误帧、透传（交 L1 protocol 解码）。
 
 ### 3.2 渲染要点
@@ -65,7 +65,7 @@ render → connect(TCP) → [tx: RESET] → [tx: 清 24 径]
 
 ### 4.1 职责
 - canonical model（`time.mode=time_varying` + CIR 载荷 `gain_series`/`cir_ref`（《03c》§5.2），或由 static taps 采样生成）→ `.asc` 文件。
-- 承载 **A 档**数据（逐时刻相干 CIR），作为 **RF-SoC CIR 回放模式**的输入格式载体。
+- 承载 **A 档**数据（逐时刻相干 CIR）；当前为 A 档唯一现实出口（当前 RF-SoC 不支持 CIR 注入，《12》#1）。
 
 ### 4.2 .asc 格式（据 ChannelEgine 样例）
 ```

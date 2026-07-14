@@ -13,7 +13,7 @@
 | **P1** | 单信道 TDL 闭环 | MPDB→TDL→TCP 下发→遥测确认端到端；B 档相关最小实现 | Q4/Q6 |
 | **P2** | 引擎集成 + API 产品化 | ChannelEgine 微服务 + `ChannelEngineClient`；REST + SDK；场景/会话管理；GUI 对接 | 《07》契约 |
 | **P3** | MIMO 相关 + 高级能力 | `CorrelationSynthesizer` B 落地；扫频/瑞利谱/信号源；AscCirBackend 完善（承载 A） | Q2/Q3 |
-| **P4** | 多设备 + SCPI + 校准验收 | 可扩展寻址、SCPI 兼容层、校准与验收体系；A 档（若 Q1 确认） | Q1 |
+| **P4** | 多设备 + SCPI + 校准验收 | 可扩展寻址、SCPI 兼容层、校准与验收体系；A 档接口保留（当前 RF-SoC 不支持 CIR 注入，按设备 capabilities 启用） | Q1 |
 
 ---
 

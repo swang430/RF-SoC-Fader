@@ -80,15 +80,15 @@ for (tx_m, rx_n) in antenna_pairs:                # 映射到栅格 (input,outpu
 
 ---
 
-## 4. A 档（预留）：时变相干矩阵输入 → RF-SoC CIR 回放模式
+## 4. A 档（通用能力，接口保留）：时变相干矩阵输入
 
-**设计方向（已定）**：A 档按**时变相干（相关）矩阵输入**设计，目标设备 = **RF-SoC 自身的 CIR 回放模式**（非 PropSim/Spirent）；`.asc` 作为**预留接口/格式载体**。
+**设计方向**：A 档按**时变相干（相关）矩阵输入**设计，是平台作为**通用 fader 工具**的保留能力（《12》§0）。
 
-- **数据已就绪**：ChannelEgine 已能产出带 38.901 空间相关的**逐时刻时变 CIR**（`.asc`：N 个 CIR × T 抽头 + 更新率），即 A 档所需的相干时变矩阵序列。
-- **落地路径**：
-  1. **主路径**：canonical model（`time.mode=time_varying` + CIR 载荷 `gain_series`/`cir_ref`，《03c》§5.2）→ **RF-SoC CIR 回放模式**（经其 CIR 注入帧）。⚠️ 该注入帧/接口协议 V3.0 未暴露，是 A 档唯一硬门槛（《12》#1，**待硬件确认**）。
-  2. **预留接口**：AscCirBackend 把同一 time_varying 模型渲染为 `.asc`，作为 RF-SoC CIR 模式的输入格式载体 / 离线交换。
-- 两路都消费 canonical model 的 `time.mode=time_varying` + CIR 载荷（`gain_series` 内联 / `cir_ref` 外置），策略接口与 B 档统一；硬件确认前守卫拒绝 `correlation.mode=A` 实际下发。
+- **硬件结论（2026-07-14）**：**当前 RF-SoC 不支持 CIR 注入**（无 CIR 回放模式/注入帧，《12》#1）。→ `RFSoCBackend.capabilities` 声明不支持 CIR；守卫拒绝 `correlation.mode=A` 下发到当前设备。**本期旗舰承诺锁定 B 档。**
+- **接口全部保留、暂不对当前设备实现**：canonical model 的 `time_varying`+CIR 载荷（`gain_series`/`cir_ref`，《03c》§5.2）、`ATimeVaryingSynthesizer`、AscCirBackend 设计不变。
+- **数据已就绪**：ChannelEgine 已能产出带 38.901 空间相关的**逐时刻时变 CIR**（`.asc`），即 A 档所需的相干时变矩阵序列。
+- **A 档现实出口**：AscCirBackend 渲染 `.asc`（通用 CIR 交换格式）——离线分析、第三方 fader 回放、未来支持 CIR 的设备/固件（届时按 capabilities 启用）。
+- **固件演进信号**：硬件方表示固件升级后「相关矩阵可拆解为每链路复系数」在设备内生效——与本篇 B 档软件塌缩同构；未来可经 capabilities 声明「设备侧拆解」，与软件塌缩二选一。
 
 ---
 

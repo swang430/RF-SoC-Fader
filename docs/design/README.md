@@ -26,7 +26,7 @@
 | T1-11 | [非功能与横切](00-overall/T1-11-nfr-cross-cutting.md) | 事务/可观测/安全/校准 |
 | T1-12 | [风险与待确认清单](00-overall/T1-12-risks-open-items.md) | ★ 待硬件确认项 Q1–Q6 |
 | T1-13 | [路线图](00-overall/T1-13-roadmap.md) | P0–P4 阶段与关键路径 |
-| T1-14 | [GUI 顶层概念设计](00-overall/T1-14-gui-concept.md) | 五主视图、三设计立场、Web/桌面待定档 |
+| T1-14 | [GUI 顶层概念设计](00-overall/T1-14-gui-concept.md) | 五主视图、三设计立场、技术形态已定 Web |
 
 ## 后续（骨架已建，待展开）
 

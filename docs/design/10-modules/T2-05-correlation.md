@@ -56,8 +56,8 @@ class FidelityReport:                   # §5 数值核验产物
 ## 3. B 方案编排（核心伪代码，落实《T1-06》§6bis）
 
 ```python
-def reduce_to_tdl(rt, portmap, cfg):
-    lam = C / rt.meta.center_frequency_hz                        # λ = c/fc
+def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 §2 契约的 model（level∈{RT,GCM,CDL}）
+    lam = C / model.meta.center_frequency_hz                     # λ = c/fc
     pairs = {}                                                    # (in,out) → 阵元对射线集（复增益已含导向相位）
 
     def rays_of(link):                                            # ★层级适配：RT=真径；GCM/CDL=簇→伪径
@@ -66,24 +66,25 @@ def reduce_to_tdl(rt, portmap, cfg):
                           gain=sqrt(c.power_linear)*exp(1j*cluster_phase(model, link, k)),
                           # cluster_phase：schema 升版后读 Cluster.phase_rad；升版前读
                           # provenance.import_config 的引擎结果（过渡载体，两处单一实现）
-                          angles=cluster_center_angles(c)) for c in link.clusters]
+                          angles=cluster_center_angles(c)) for k, c in enumerate(link.clusters)]
+                          # ★k 由 enumerate 绑定：簇序号即 phase_rad 的索引键（引擎按簇序输出）
         # 簇初相 phase_rad 来自引擎（seed 确定，T2-03 §2）；★该字段属 T1-03c 升版打包项（T2-04 §8-5 ③），
         # 升版落地前以 provenance.import_config 内的引擎结果为过渡载体；簇内角扩展本期不展开（§2 注）
 
     if portmap.link_mode == "per_element_pair":
         # RT 已逐阵元对算径（几何真值，含近场效应）——无需导向合成
-        for link in rt.environment.links:
+        for link in model.environment.links:
             io = portmap.map(link.tx_index, link.rx_index)        # ElementKey→(input,output)
             pairs[io] = [(r.delay_s, r.gain, angles(r)) for r in rays_of(link)]
     else:  # single_reference：Phase 2 导向合成（★必须先于量化合并——正确性要点 1）
-        ref = rt.environment.links[0]
-        for m in tx_elements(rt.meta.arrays):
-            for n in rx_elements(rt.meta.arrays):
+        ref = model.environment.links[0]
+        for m in tx_elements(model.meta.arrays):
+            for n in rx_elements(model.meta.arrays):
                 io = portmap.map(m, n)
                 pairs[io] = [
                     (r.delay_s,
-                     r.gain * steer(rt.meta.arrays.tx, m, r.aod_az_deg, r.aod_zen_deg, lam)
-                            * conj(steer(rt.meta.arrays.rx, n, r.aoa_az_deg, r.aoa_zen_deg, lam)),
+                     r.gain * steer(model.meta.arrays.tx, m, r.aod_az_deg, r.aod_zen_deg, lam)
+                            * conj(steer(model.meta.arrays.rx, n, r.aoa_az_deg, r.aoa_zen_deg, lam)),
                      angles(r))
                     for r in rays_of(ref)]
 
@@ -99,13 +100,13 @@ def reduce_to_tdl(rt, portmap, cfg):
     taps = {io: normalize(bins, ref=sqrt(ref_power)) for io, bins in binned.items()}
 
     # Phase 5：目标相关矩阵（供核验/GUI；R 不进设备帧——《T1-03b》）
-    R_tx, R_rx = correlation_from_angles(rt, rt.meta.arrays, lam)  # §4
+    R_tx, R_rx = correlation_from_angles(model, model.meta.arrays, lam)  # §4
     R = kron(R_tx, R_rx)
 
     # 可选：几何多普勒 f_d=(v·k̂_arr)/λ 逐径；瑞利谱 spec（功率归一化交 M8 hook）
     apply_doppler_and_rayleigh(taps, cfg, lam)
 
-    tdl = assemble_tdl_model(rt, taps, correlation=(R_tx,R_rx,R), reduced_from=rt.id)
+    tdl = assemble_tdl_model(model, taps, correlation=(R_tx,R_rx,R), reduced_from=model.id)
     return tdl, verify_fidelity(tdl, R, quant)                    # §5
 ```
 
@@ -119,8 +120,9 @@ def reduce_to_tdl(rt, portmap, cfg):
 ## 4. 目标相关矩阵计算（《T1-06》§2 落地）
 
 ```python
-def correlation_from_angles(rt, arrays, lam):
+def correlation_from_angles(model, arrays, lam):
     # 径集：per_element_pair 用参考功率谱（所有链路射线并集）；single_reference 用参考链路
+    #   ——径集一律经 §3 rays_of 适配取得（GCM/CDL 即簇伪径，角度=簇中心角）
     R_tx = Σ_k P_k · a_tx(φ_dep,k, θ_dep,k) · a_tx(...)ᴴ         # M_tx×M_tx
     R_rx = Σ_k P_k · a_rx(φ_arr,k, θ_arr,k) · a_rx(...)ᴴ
     R_tx /= trace(R_tx)/M_tx ; R_rx /= trace(R_rx)/M_rx           # 对角归一

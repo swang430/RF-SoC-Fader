@@ -86,8 +86,11 @@ def to_canonical(res, req, portmap) -> ChannelModel:
     #   不产 environment（schema 中 environment/channels 按 level 互斥，CIR 载荷只挂 channels）；
     #   统计描述(lsps/clusters)入 provenance 供溯源
     # meta.arrays=req.arrays（自包含）；provenance={source_type:"ChannelEgine_38901",
-    #   source_ref:f"{engine_version}", import_config:{**req, "portmap": serialize(portmap)}}
-    #   ——seed 与 portmap 均入 provenance（可复现 + M5 前置校验，与 M4 对称）
+    #   source_ref:f"{engine_version}",
+    #   import_config:{**req 剔除 client_key, "portmap": serialize(portmap)}}
+    #   ——★client_key 是传输层幂等键（逐次提交新 UUID），不属物理配置：若入 provenance，
+    #   同一物理配置两次生成的 provenance 将不可判等（破坏可复现比对与回归判等），故剔除；
+    #   seed 与 portmap 均入 provenance（可复现 + M5 前置校验，与 M4 对称）
 ```
 
 - **两源统一兑现**：产出与 M4 同一 schema——GCM/CDL 模型交 **M5** 沿退化链降到 TDL（**M5 契约随本篇修订为接受 level∈{RT,GCM,CDL}**，簇路径见《T2-05》§2/§3 修订——原 RT-only 契约无法消费引擎产物）；TDL-x 直落 `channels[].taps`；CIR 交 AscCirBackend。

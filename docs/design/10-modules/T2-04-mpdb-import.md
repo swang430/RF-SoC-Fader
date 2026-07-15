@@ -91,9 +91,14 @@ V6 能力上限: 端口数/信道数 ≤ backend.capabilities.grid（M2）
 
 ```python
 def import_mpdb(source, arrays: {tx: AntennaArray, rx: AntennaArray},
-                portmap: PortMap, cfg: ImportConfig) -> tuple[ChannelModel, ImportReport]:
+                portmap: PortMap, cfg: ImportConfig,
+                target_caps: BackendCapabilities) -> tuple[ChannelModel, ImportReport]:
     raw = mpdb_reader.load(source)                       # §2
-    validate_portmap_against(raw.links, portmap, cfg)    # §3（含 link_mode 核验）
+    validate_link_table(raw.links, portmap.link_mode, arrays)   # §3.1 分模式核验（端点集合/单链路）
+    validate_portmap(portmap, ValidationContext(                # §3.2 V1–V6：上下文完整传入——
+        grid_topology=cfg.topology, path_expansion_enabled=cfg.path_expansion,
+        capabilities=target_caps, test_mode=cfg.test_mode, arrays=arrays))
+        # ★arrays(V4 极化) 与 capabilities(V6) 必须显式到场，否则 §3.2 承诺的检查无法执行
     rays, report = clean(raw.rays)                       # 去 NaN/Inf/零增益；report=逐类丢弃计数（★随返回值带出，不丢）
     model = ChannelModel(
         schema_version=..., id=new_id(), level="RT", realization="none",
@@ -130,7 +135,9 @@ def import_mpdb(source, arrays: {tx: AntennaArray, rx: AntennaArray},
 # ★顺序纪律（《T1-06》正确性要点 1）：这些函数必须在 M5 施加导向相位【之后】调用——
 #   M4 只提供机制，不自行对 RT 径调用（防"先合并后导向"破坏相关性）
 def quantize_delays(delay_s: ndarray) -> tuple[ndarray, QuantReport]
-    # round(delay/(1000/120ns))；超出 0..1050 的径 **丢弃**（T1-05 §6 冻结契约：丢弃并计数上报，
+    # ★单位显式：code = round(delay_s / PATH_DELAY_UNIT_S)，其中 PATH_DELAY_UNIT_S = (1000/120)ns × 1e-9
+    #   ——输入为秒（canonical），除数必须同为秒；直接除以 ns 步长会差 1e9 倍。
+    # 超出 0..1050 的径 **丢弃**（T1-05 §6 冻结契约：丢弃并计数上报，
     # ★不得夹到端点 bin——夹取会把不存在的能量堆到 0/1050）；
     # QuantReport = {dropped_low/high 计数 + 丢弃掩码}，并入 ImportReport（§6），不静默
 def merge_bins(delay_code, gain) -> list[Bin]               # 同 bin 复增益相干叠加（保相位）；noncoherent 仅用于功率统计

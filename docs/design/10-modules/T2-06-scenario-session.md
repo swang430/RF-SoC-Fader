@@ -83,7 +83,7 @@ class ResolvedArtifacts:
 
 | 状态 | 含义 | 允许操作 |
 | :-- | :-- | :-- |
-| CREATED | 已绑定 scenario@version × device × backend，未物化 | resolve / close |
+| CREATED | 已绑定 scenario@version × device × backend，未物化 | resolve / apply（auto_resolve：内部先 resolve）/ close |
 | RESOLVING | 编排管线运行中（§4；长耗时异步 job，《T1-04》） | 查询进度 / cancel |
 | READY | 产物就绪（FramePlan/AscFileSet + 报告），设备零触达 | dry_run / apply / close |
 | APPLYING | M2 事务进行中 | 查询进度（同会话禁止并发第二个 apply） |
@@ -133,7 +133,9 @@ async def resolve(sess) -> ResolvedArtifacts:
     arts = ResolvedArtifacts(model.id, artifact, hash_of(artifact), collect_reports(rep, fidelity))
     artifact_cache.put(..., arts); return arts
 
-async def apply(sess, dry_run=False) -> ApplyResult | Manifest:
+async def apply(sess, dry_run=False, auto_resolve=True) -> ApplyResult | Manifest:
+    if sess.state == CREATED and auto_resolve:            # ★复合语义归 M6：CREATED 直接 apply 时先物化再下发
+        set_artifacts(sess, await resolve(sess))          #   （M7 零业务逻辑——网关不检查状态不编排，T2-07 §1）
     if dry_run:                          # dry-run：返回 READY 缓存的 manifest——零设备触达（T1-04）
         return manifest_of(sess.artifacts.artifact)      # RFSoC：帧摘要/字节数；asc：文件预览
     if sess.device_id is not None:                       # asc 无设备语义，跳过租约

@@ -31,7 +31,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `/sessions` | POST `{scenario_id, version, device_id?, backend}` | M6 create（锁定版本） | control | 同步 |
 | `/sessions/{id}` | GET | 状态机态 + reports + last_apply + tweaks | read | 轮询 |
 | `/sessions/{id}/resolve` | POST | M6 resolve（长耗时） | control | **202** |
-| `/sessions/{id}/apply` | POST `?dry_run=` | M6 apply；**复合便捷**：CREATED 态自动先 resolve 再 apply——顺序调用 M6 两个操作，非网关内编排逻辑 | control | 202（dry_run 同步返 manifest） |
+| `/sessions/{id}/apply` | POST `?dry_run=` | M6 `apply(auto_resolve=True)`——CREATED 态由 **M6 内部**先 resolve 再 apply（T2-06 §4）；网关不检查状态、不编排（单次 L3 调用） | control | 202（dry_run 同步返 manifest） |
 | `/sessions/{id}/channels/{in}_{out}` | GET/PATCH | GET=artifact 参数视图+tweaks 叠加；PATCH=M6 tweak（T2-06 §4bis，仅 ACTIVE） | read/control | 同步 |
 | `/channels` | GET/PATCH | **《T1-04》原路径兼容别名**：映射到当前唯一 ACTIVE 会话；0 个或 ≥2 个 ACTIVE → 409 指明改用嵌套路径 | 同上 | 同步 |
 | `/sessions/{id}/close` | POST `{release}` | M6 close（DIRTY 强制 reset 由 M6 裁决，网关只透传） | control | 同步 |
@@ -86,7 +86,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `*OPC?` | 操作完成同步 | 会话终态轮询封装 |
 | `:SCENario:LOAD "name"` | 按名加载最新 version | scenario_repo |
 | `:SESSion:BACKend RFSOC\|ASC` | 绑定后端（隐式会话） | M6 create |
-| `:SESSion:APPLy` / `:SESSion:STATe?` | 复合 resolve+apply / 状态查询 | M6（同 REST 复合语义） |
+| `:SESSion:APPLy` / `:SESSion:STATe?` | 下发 / 状态查询 | M6 `apply(auto_resolve=True)`（与 REST 同一调用）/ get |
 | `:SESSion:CLOSe [DISable\|RESet\|LEAVe]` | 关闭（缺省 DISable；DIRTY 强制 RESet 由 M6 裁决） | M6 close |
 | `:TELemetry:OUTPut:POWer? (@n)` 等 | 遥测查询 | M8 快照 |
 
@@ -101,10 +101,9 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 第三方/SDK        M7(REST)              M6                    M8
   │ POST /sessions/{id}/apply
   │──────────────►│ 鉴权(control) + 审计(begin)
-  │                │── state==CREATED? → resolve() ──►│（长耗时）
-  │  202 {poll_url}│◄─（立即返回，后台续跑）           │
+  │                │── apply(auto_resolve=True) ────►│ CREATED?→内部先 resolve（长耗时）
+  │  202 {poll_url}│◄─（立即返回，后台续跑）           │   再 apply → M2 事务
   │◄───────────────│                                  │
-  │                │──（resolve 完成后）apply() ─────►│→ M2 事务
   │ GET /sessions/{id}（轮询）                        │
   │──────────────►│── get() ────────────────────────►│
   │  ACTIVE + 报告 │◄─────────────────────────────────│
@@ -127,7 +126,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | **鉴权矩阵** | 3 scope × 全端点（含 SSE、SCPI） | 401/403 无遗漏、错误含所需 scope |
 | **审计完备** | control 域全操作 × 成功/失败/被拒 | 每次调用恰一条 AuditRecord |
 | **限流** | 突发+持续超额 | 429 + Retry-After；不影响其他 key |
-| **复合 apply** | CREATED 态直接 apply | M6 收到 resolve→apply 两次调用（顺序断言） |
+| **复合 apply 透传** | CREATED 态直接 apply | 网关仅发**一次** L3 调用 `apply(auto_resolve=True)`；状态检查发生在 M6（stub 断言零状态读取） |
 | **/channels 别名** | 0/1/2 个 ACTIVE 会话三剧本 | 唯一时等价嵌套路径；否则 409 指明嵌套路径 |
 | **SSE** | 断线重连（窗内/窗外）、心跳 | Last-Event-ID 续传正确；窗外 205 |
 | **SCPI 黄金** | 指令表全集 + 错误队列剧本 | 响应逐字节；与 REST 同输入同 L3 结果 |

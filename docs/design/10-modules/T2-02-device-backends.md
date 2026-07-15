@@ -51,6 +51,9 @@ class AscFileSet:                   # Asc 产物：{(in,out): asc_text}
 @dataclass(frozen=True)
 class ApplyResult:
     committed: bool
+    device_state: Literal["committed", "rolled_back", "dirty"]
+    #   dirty = 回滚不可达（如事务中断连，RESET 发不出去）：设备状态未知、可能残留部分配置，
+    #           不得谎称已回滚；重连后须先 RESET/重新 apply 才可信（§4/§7）
     frames_sent: int; frames_verified: int
     failure: FailureInfo | None     # 首个失败帧/原因（echo 不符/超时/错误帧/溢出）
     telemetry: TelemetryFrame | None
@@ -107,6 +110,11 @@ IDLE ──apply(plan)──► APPLYING ──全帧 echo 通过──► VERIF
                         │ echo 不符/超时/错误帧          │ 溢出/电平异常
                         ▼                              ▼
                      ROLLING_BACK ──发 RESET──► ROLLED_BACK(带 FailureInfo)
+                        │
+                        │ RESET 发送失败/连接已死（无法在原连接回滚）
+                        ▼
+                      DIRTY（设备状态未知：可能残留部分配置——重连后必须先 RESET/重新 apply，
+                            方可再次进入可信状态；不得谎称已回滚）
 ```
 
 ```python
@@ -116,8 +124,9 @@ async def apply(self, plan: FramePlan) -> ApplyResult:
         await self._tx(frame)
         echo = await self._await_echo(timeout=ECHO_TIMEOUT)     # M1 DownlinkParser 产出
         if echo is ERROR_FRAME or echo is TIMEOUT or not verify_copy_echo(frame, echo):
-            await self._rollback()                              # RESET 到已知基线
-            return ApplyResult(committed=False, failure=at(idx, reason), ...)
+            state = await self._rollback()   # 尝试 RESET；连接已死/发送失败→返回 "dirty"
+            return ApplyResult(committed=False, device_state=state,   # "rolled_back" | "dirty"
+                               failure=at(idx, reason), ...)
     tele = await self._request_telemetry_once()                 # ID14=0x03 单次
     if tele.adc_overrange or tele.combiner_overflow or tele.awgn_overflow:
         await self._rollback()
@@ -166,7 +175,7 @@ def readback() -> None
 
 | 类别 | 触发 | 处置 |
 | :-- | :-- | :-- |
-| 传输错误 | 连接失败/中途断连/发送异常 | 重试(有限次)→degraded；事务中→回滚+失败上报 |
+| 传输错误 | 连接失败/中途断连/发送异常 | 重试(有限次)→degraded；**事务中断连**：RESET 不可达→置 **dirty**（`device_state="dirty"`，不谎称已回滚）；重连后先 RESET/重 apply 才可信 |
 | 协议错误 | 错误帧(FDB185FF)/echo 不符/echo 超时 | 立即回滚；FailureInfo 带帧号与差异摘要 |
 | 设备异常 | 遥测溢出位/电平越限 | 回滚；遥测快照随结果返回（供 M8/GUI） |
 | 能力拒绝 | 模型要求超出 capabilities | render 前即拒（不触设备），明确错误 |
@@ -179,7 +188,7 @@ def readback() -> None
 | 类别 | 内容 | 判据 |
 | :-- | :-- | :-- |
 | **切分属性** | 随机模型生成 FramePlan：每帧 payload≤4000B；组不跨帧；顺序保持；G0 在首帧头、G5 在尾帧尾 | 属性全成立（含 24 径+瑞利满配 ≈8 帧 的边界例） |
-| **事务（假设备）** | 本地 asyncio TCP 假设备（回显/篡改 1 字节/超时/回错误帧/中途断连/遥测置溢出位六种剧本） | commit/rollback 判定与 FailureInfo 定位正确；回滚必发 RESET |
+| **事务（假设备）** | 本地 asyncio TCP 假设备（回显/篡改 1 字节/超时/回错误帧/中途断连/遥测置溢出位六种剧本） | commit/rollback/**dirty** 判定与 FailureInfo 定位正确；可达时回滚必发 RESET；**断连剧本必须判 dirty 而非 rolled_back** |
 | **幂等** | 同一 FramePlan 连发两次 | 帧序列字节一致、结果一致 |
 | **dry-run** | render 不建立任何连接（socket 层断言） | 纯函数性 |
 | **AscCir 黄金** | 已知 canonical → .asc 与 ChannelEgine 样例格式逐行比对 | 格式/数值一致 |

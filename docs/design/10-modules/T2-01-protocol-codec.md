@@ -84,7 +84,8 @@ PULSE_UNIT_NS      = 25.0 / 3.0             # 脉宽/周期
 CH_MAIN_DELAY_UNIT_NS = 50.0 / 3.0          # 信道主时延（0..6090）
 INPUT_DELAY_UNIT_US   = 1.0 / 120.0         # 输入时延（0..72e6；>10µs 生效）
 
-def sweep_start_hz_to_code(hz) -> int        # 范围校验 ±2**27，越界 ValueError
+def sweep_start_hz_to_code(hz) -> int        # 细分定标 SWEEP_FINE_SCALE；范围校验 ±2**27，越界 ValueError
+def sweep_end_hz_to_code(hz) -> int          # ★粗定标 1/35.791394133Hz（与多普勒 ID4 同定标同范围 ±2**27）
 def sweep_speed_to_code(hz_per_us) -> int    # 范围校验 [-2**17, 2**17-1]（下界 −2¹⁷ 合法），越界 ValueError
 def sigsrc_hz_to_code(hz) -> int             # 范围校验 [-2**31, 2**31-1]（i32 上界 2³¹−1），越界 ValueError
 def pulse_ns_to_code(ns) -> int              # u32
@@ -160,11 +161,11 @@ class DownlinkParser:
             if i > 0: drop(i)                             #    前缀前垃圾→丢弃并计数（此后帧头对齐缓冲区起点）
             if len(self._buf) < 4: break                  # ② 等第 4 字节（帧型）
             kind = self._buf[3]
+            if kind not in KNOWN_KINDS: drop(1); continue # ③0 未知帧型先拒（勿对未知 kind 查 header_len）
             if len(self._buf) < header_len(kind): break  # ③a 变长帧(0x69/0x50)：长度字段本身未到齐→等下一分片
             #    header_len: 0x41/0xFF→4；0x69→6(含2B长度)；0x50→5(含1B长度)
             need = expected_len(kind, self._buf)          # ③b 按帧型定长/取长度字段
             #    0x41→4+2+131+2；0xFF→7；0x69→4+2+len+2；0x50→4+1+len+2
-            if need is UNKNOWN_KIND: drop(1); continue    # 未知帧型→丢 1 字节从头重扫（勿用陈旧偏移 i）
             if need > MAX_FRAME_LEN[kind]: drop(1); continue  # ③c 长度字段超协议上限（0x69→4008=4+2+4000+2）
             #    →判坏前缀立即重同步，不得傻等永不到来的字节（防解析停摆）
             if len(self._buf) < need: break               # ④ 数据不足→等下一分片

@@ -29,7 +29,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `/scenarios` | GET/POST | scenario_repo 列表/创建（version=1） | read/write | 同步 |
 | `/scenarios/{id}` | GET(`?version=`)/PUT/DELETE | 读指定版；**PUT=创建新 version**（版本不可变，T2-06 §2）；DELETE=**归档**（被会话/审计引用，禁止物理删） | read/write | 同步 |
 | `/sessions` | POST `{scenario_id, version, device_id?, backend}` | M6 create（锁定版本） | control | 同步 |
-| `/sessions/{id}` | GET | 状态机态 + reports + last_apply + tweaks | read | 轮询 |
+| `/sessions/{id}` | GET | 状态机态 + reports + last_apply + **last_error**（异步失败的结构化错误，T2-06 §2——RESOLVE_FAILED 等终态的唯一定位来源，直译 §3 problem+json 扩展字段）+ tweaks | read | 轮询 |
 | `/sessions/{id}/resolve` | POST | M6 `submit_resolve`（任务在 M6 运行器内，网关不持协程，T2-06 §4 提交面） | control | **202** |
 | `/sessions/{id}/apply` | POST `?dry_run=` | M6 `submit_apply(auto_resolve=True)`——CREATED 态由 **M6 内部**先 resolve 再 apply；dry_run=true 走同步 `apply(dry_run=True)` 直返 manifest（**仅 READY/ACTIVE**：CREATED 时 M6 抛 InvalidState → 409 指明先 resolve——物化长耗时不得混入同步路径）。网关不检查状态、不编排、不持协程（单次 L3 调用） | control | 202（dry_run 同步返 manifest） |
 | `/sessions/{id}/channels/{in}_{out}` | GET/PATCH | GET=artifact 参数视图+tweaks 叠加；PATCH=M6 tweak（T2-06 §4bis，仅 ACTIVE） | read/control | 同步 |
@@ -77,12 +77,14 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 ## 5. SCPI-over-TCP 兼容层（P4，契约先行）
 
 - 传输：TCP 行协议；**一连接 = 一隐式会话上下文**（绑定默认设备，适配仪器测试台单机习惯）；IEEE 488.2 最小集。多会话/多设备编排**不覆盖**——走 REST/SDK。
+- **认证（SCPI 同为外部信任边界，《T1-04》§6 无豁免）**：连接建立即处于**未认证态**，仅允许 `*IDN?`、`:SYSTem:ERRor?` 与 `:SYSTem:AUTH "api-key"`；`AUTH` 校验通过后连接绑定该 key 的 scope（与 REST 同一密钥表与三档 scope，§4）——scope 不足的指令按 SCPI 惯例错误入队列。未认证态下发其他指令 → 错误入队列、不断连。内网免认证为部署级 feature-flag（默认关，与 REST 同栈裁决）。
 - 指令表（每条转译为与 REST 相同的 L3 调用，零逻辑分叉）：
 
 | SCPI | 语义 | L3 |
 | :-- | :-- | :-- |
 | `*IDN?` | 平台/设备标识 | version + registry |
 | `*CLS` / `:SYSTem:ERRor?` | 错误队列清除 / FIFO 弹出 | 网关侧队列（problem 摘要按 SCPI 习惯入队） |
+| `:SYSTem:AUTH "api-key"` | 连接认证（绑定 key 的 scope；未认证态唯三合法指令之一） | 认证栈（与 REST 同密钥表） |
 | `*OPC?` | 操作完成同步 | 会话终态轮询封装 |
 | `:SCENario:LOAD "name"` | 按名加载最新 version | scenario_repo |
 | `:SESSion:BACKend RFSOC\|ASC` | 绑定后端（隐式会话） | M6 create |

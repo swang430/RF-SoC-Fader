@@ -51,6 +51,10 @@ class Session:
     state: SessionState                       # §3 状态机
     artifacts: ResolvedArtifacts | None       # resolve 产物缓存
     last_apply: ApplyResult | None            # M2 结果原样保留（含 device_state / telemetry）
+    last_error: StructuredError | None        # ★最近一次失败的结构化错误（ScenarioError/CapabilityError/
+                                              #   EngineError/ImportError 原样）：异步任务失败时由运行器写入——
+                                              #   RESOLVE_FAILED 时 reports/last_apply 皆空，这是轮询方唯一的
+                                              #   定位来源（M7 直译 problem+json）；下次操作成功时清空
     tweaks: tuple[TweakRecord, ...]           # ACTIVE 期微调记录（§4bis）：设备现态=artifact+tweaks 按序重放
     audit: tuple[AuditRecord, ...]            # ★会话生命周期操作全记录（resolve/apply/tweak/close/recover）：
                                               #   谁·何时·终局结果；触达设备类另含帧摘要（T1-11 §3 为最低要求，

@@ -52,7 +52,10 @@ class Session:
     artifacts: ResolvedArtifacts | None       # resolve 产物缓存
     last_apply: ApplyResult | None            # M2 结果原样保留（含 device_state / telemetry）
     tweaks: tuple[TweakRecord, ...]           # ACTIVE 期微调记录（§4bis）：设备现态=artifact+tweaks 按序重放
-    audit: tuple[AuditRecord, ...]            # 触达设备操作全记录：谁·何时·帧摘要·结果（T1-11 §3）
+    audit: tuple[AuditRecord, ...]            # ★会话生命周期操作全记录（resolve/apply/tweak/close/recover）：
+                                              #   谁·何时·终局结果；触达设备类另含帧摘要（T1-11 §3 为最低要求，
+                                              #   此处放宽为全生命周期——异步任务由 M6 运行器在终局写入，
+                                              #   含 RESOLVE_FAILED 等非设备触达终局，保证无轮询也闭合）
 
 @dataclass(frozen=True)
 class ResolvedArtifacts:

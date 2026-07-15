@@ -69,7 +69,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 - **认证**：API-Key（第三方，Header）＋短时会话令牌（GUI）。本地部署默认静态密钥表（M10 配置承载）；OIDC/IdP 为可插拔后续项（商用部署）。
 - **鉴权三档 scope**（递进包含）：
   `read`（遥测/场景/模型/会话状态 GET）⊂ `write`（imports/scenarios 写）⊂ `control`（sessions 的 apply/tweak/close/recover 及一切**触达设备**操作）。
-- **审计中间件**：control 域每次调用（**含失败与被拒**）→ `AuditRecord{key_id, when, op, session_id, manifest_digest, outcome}` → M10 append-only。**同步操作记终局 outcome；异步提交记「受理」（含 op_id）**——终局结果由 M6 任务运行器在任务完成时写入会话审计（T2-06），网关**不依赖后续轮询闭合审计**；GET 类请求纯读、零审计写。与 M6 会话内审计**互补不重复**：网关记「谁经哪个门做了什么请求」，M6 记「设备上实际发生了什么」。
+- **审计中间件**：control 域每次调用（**含失败与被拒**）→ `AuditRecord{key_id, when, op, session_id, manifest_digest, outcome}` → M10 append-only。**同步操作记终局 outcome；异步提交记「受理」（含 op_id）**——终局结果由 M6 任务运行器在任务完成时写入会话审计（T2-06 §2：审计域=会话生命周期全记录，**含 resolve 这类非设备触达任务的终局**），网关**不依赖后续轮询闭合审计**；GET 类请求纯读、零审计写。与 M6 会话内审计**互补不重复**：网关记「谁经哪个门做了什么请求」，M6 记「会话/设备上实际发生了什么」。
 - **限流**：per-key 令牌桶（read/write/control 分桶）；apply 类在 M6 设备租约处天然串行——网关**不做隐式排队**（同 M6 语义），队列深度超限直接 429。
 
 ---

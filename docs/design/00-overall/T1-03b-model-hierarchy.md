@@ -1,7 +1,7 @@
 # 03b · 信道模型层级与退化（顶层设计）
 
 > 第一册《总体设计》· 第 3b 篇（紧接《03-architecture》的顶层原则）
-> 状态：草稿 v0.1 · 待评审
+> 状态：**v1.0 · 已冻结**（2026-07-15，tag: design-t1-v1.0）
 > 前置：《03-architecture》；下游《05-rt-mpdb-to-tdl》《06-correlation-mimo》《07-channel-model-engine》
 
 ---

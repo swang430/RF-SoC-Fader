@@ -1,7 +1,7 @@
 # 03c · 信道 Schema（canonical model 规范契约）
 
 > 第一册《总体设计》· 第 3c 篇（枢纽契约的字段级规范）
-> 状态：草稿 v0.1 · 待评审 · **规范性(normative)**
+> 状态：**v1.0 · 已冻结**（2026-07-15，tag: design-t1-v1.0）· **规范性(normative)**
 > 前置：《03-architecture》§4、《03b-model-hierarchy》；被 L1/L2/L3/L4、两上游源、两后端共同依赖
 
 ---

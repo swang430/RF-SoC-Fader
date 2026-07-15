@@ -45,7 +45,7 @@ def encode(kind, obj) -> bytes ; def decode(kind, data) -> obj ; def sniff(data)
 | `ScenarioRepo` | Scenario 全版本 | **版本不可变**（追加式）；并发创建新版本由**乐观锁**裁决（冲突→VersionConflict，M7 映 409，T2-06 §6） |
 | `SessionRepo` | Session 快照 | 每次 transition/set_artifacts/append_tweak 写新快照；**重启恢复数据面**（T2-06 §3：状态降级、孤儿 current_op 清理、completed_ops 有界历史的持久载体） |
 | `AuditRepo` | 审计双源 | **append-only**（无 UPDATE/DELETE 路径——接口层面不提供）；网关受理记录（T2-07 §4）+ 会话生命周期终局（T2-06 §2）两源同仓不同 kind |
-| `ModelRepo` | canonical model | **内容寻址**（model_id = 载荷 sha256）：同模型天然去重——幂等链（T2-06 §4）的存储面 |
+| `ModelRepo` | canonical model | **内容寻址**：model_id = **规范化载荷**的 sha256——规范化=剔除 `id` 字段自身（否则哈希依赖哈希、循环自指）与 provenance 墙钟字段（imported_at 等，不改变物理内容；seed/配置差异**保留**——不同来源配置就该不同 id）+ 键序/浮点表示规范化；入库后回填 `id=hash`。同物理内容+同来源配置 → 同 model_id（幂等链存储面，T2-06 §4） |
 | `ConfigRepo` | 告警规则/校准表/密钥表/运行参数 | 版本化配置（M8 阈值、bypass 表、M7 密钥与 scope、缓冲窗 N 等）；变更留痕 |
 
 - **选型**：单机首版 **SQLite**（零运维、事务足够——写并发瓶颈在设备租约处天然串行）；接口层（Protocol）隔离，Postgres/对象存储为商用替换项（开放问题 §7-1），**业务模块只见接口**。
@@ -85,7 +85,7 @@ class BlobStore:
 | 乐观锁冲突 | `VersionConflict`（携 current_version，M7→409） |
 | blob 缺失（悬空 ref） | `BlobMissing`（含 ref 与登记持有者——GC 误删可溯因） |
 | 磁盘满/IO 错 | 显式上抛（M6 事务在 apply 前失败=RESOLVE_FAILED，不产生半状态） |
-| audit 写失败 | **操作照常返回但强告警**（审计尽力而为 vs 阻塞业务——本期选不阻塞，商用复评为强一致，开放问题 §7-3） |
+| audit 写失败 | **分级**：①**设备触达类**（apply/tweak/close 微帧/recover）——**审计先行**（write-ahead）：受理记录落盘失败 → **拒绝执行**（不触设备，503+告警）——《T1-11 §3》「所有触达设备操作必须留痕」是冻结基线，不得先斩后奏；终局记录写失败 → 事实已发生不可拒：强告警+重试队列补齐（**补齐前该设备的新触达操作一律拒**）。②非触达类（resolve 受理等）——尽力而为+强告警 |
 
 ---
 
@@ -93,7 +93,7 @@ class BlobStore:
 
 1. Postgres / S3 兼容对象存储的替换时点（多实例部署前提）。
 2. 静态数据加密与备份策略（商用部署项）。
-3. 审计写失败语义：尽力而为（本期）vs 两阶段强一致（商用合规复评）。
+3. 终局审计重试队列的持久化形态（内存 vs 落盘 WAL）——§6 已定「审计先行+终局补齐」语义，此处只余载体选型。
 4. blob GC 宽限期与容量水位策略（实现期定，M10 配置承载）。
 
 ---
@@ -107,7 +107,7 @@ class BlobStore:
 | **完整性** | 篡改落盘字节 | CorruptData（不返回部分数据） |
 | **乐观锁** | 并发创建同 scenario 新版本 | 恰一成功，余 VersionConflict 携 current_version |
 | **append-only** | 尝试改写/删除审计行 | 接口不存在该路径（类型层面断言）+ 库约束拒绝 |
-| **内容寻址去重** | 同模型两次入库 | 同 model_id、单份存储 |
+| **内容寻址去重** | 同模型两次入库（**不同墙钟时刻**）；仅 seed 不同的两模型 | 前者同 model_id、单份存储（id 与墙钟字段不参与哈希——循环自指/时间戳破坏去重两校验）；后者不同 model_id |
 | **blob 生命周期** | pin/unpin/归零/宽限回收/悬空 ref | 引用计数正确；BlobMissing 可溯因 |
 | **原子写** | 写入中途 kill（注入） | 无半写文件；重启后数据面自洽（配合 T2-06 重启恢复用例） |
 | **流式直出** | >10MB 产物经 open_stream | 内存峰值有界（不整载） |

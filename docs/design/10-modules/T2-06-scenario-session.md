@@ -193,8 +193,10 @@ def submit_recover(sess) -> OperationRef: ...
 async def tweak(sess, channel: tuple[int,int], path: int | None,
                 params: TweakParams) -> ApplyResult:
     # 前置：sess.state == ACTIVE（已持有租约）；rfsoc 后端限定（asc 无「运行中设备」语义）
-    # TweakParams 仅限逐径/逐信道物理量（主时延/幅度/相位/多普勒/AWGN/输出衰减）——
-    #   使能类与 RESET 禁入：配置面不变式（configure-then-enable，T2-02 G0/G6）只归 apply 管
+    # TweakParams 仅限【真·逐径/逐信道】物理量：主时延/幅度/相位/多普勒（逐径）——
+    #   ★AWGN/输出衰减为输出口级旋钮（ID8/9/11 作用于整个输出端、影响该口所有信道），
+    #   不入 per-channel tweak（跨信道副作用）：修改走 scenario 新 version 的 re-apply；
+    #   使能类与 RESET 同样禁入：配置面不变式（configure-then-enable，T2-02 G0/G6）只归 apply 管
     frames = encode_tweak_frames(channel, path, params)     # M1 编码（物理量→码值→子帧→控制帧）
     result = await backend.apply_micro(frames)              # M2 微帧通道（echo 纪律；device_state 语义同 apply）
     record = TweakRecord(now, who, channel, path, params, result)

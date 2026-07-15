@@ -160,11 +160,14 @@ async def apply(self, plan: FramePlan) -> ApplyResult:
         state = await self._rollback()
         return ApplyResult(committed=False, device_state=state,
                            failure=at("telemetry_wait", "timeout"), ...)
-    # ★先判溢出，再谈恢复周期档——溢出即回滚，给将被 RESET 的配置恢复节奏毫无意义且多耗一轮交互：
-    if tele.adc_overrange or tele.combiner_overflow or tele.awgn_overflow:
+    # ★先判核验结果，再谈恢复周期档——失败即回滚，给将被 RESET 的配置恢复节奏毫无意义：
+    #   核验 = 溢出位图 + 电平合理性（T1-11 冻结契约「无溢出、电平合理」缺一不可）；
+    #   电平判据（期望范围/阈值）由 M8 校准模块提供，M2 只调用不定义：
+    if (tele.adc_overrange or tele.combiner_overflow or tele.awgn_overflow
+            or not self._levels_plausible(tele)):               # M8 注入的电平合理性谓词
         state = await self._rollback()                          # 同样可能 "dirty"，不得丢弃返回值
         return ApplyResult(committed=False, device_state=state,
-                           failure=overflow(tele), telemetry=tele, ...)
+                           failure=verify_fail(tele), telemetry=tele, ...)
     # —— 成功路径：恢复周期节奏。0x03 = 「单次后关闭」（《T1-A1》），不恢复则 §5 活性信号熄灭。
     #    恢复帧自身也是控制帧（会产生回显），必须同样等待并核验其 echo，防残留污染下一事务：
     restore = build_control_frame([SubFrame(ParamID.INFO_RETURN,   # 子帧经 M1 封装为完整控制帧

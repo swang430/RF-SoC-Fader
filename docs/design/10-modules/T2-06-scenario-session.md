@@ -224,7 +224,11 @@ async def tweak(sess, channel: tuple[int,int], path: int | None,
     audit_begin(sess, who, digest(frames))                  # ★审计先行（T2-10 §6）：受理记录落盘失败
                                                             #   → 拒绝执行（不触设备）——顺序不可倒，
                                                             #   与 §4 apply 的 audit_begin→backend.apply 一致
-    result = await backend.apply_micro(frames)              # M2 微帧通道（echo 纪律；device_state 语义同 apply）
+    try:
+        result = await backend.apply_micro(frames)          # M2 微帧通道（echo 纪律；device_state 语义同 apply）
+    except BaseException as e:
+        audit_end(sess, outcome_of(e)); raise               # ★begin/end 不变式同 §4：断连/超时等
+                                                            #   apply_micro 异常路径同样闭合审计
     record = TweakRecord(now, who, channel, path, params, result)
     audit_end(sess, record)                                 # 终局补记（含失败；写失败→重试队列，T2-10 §6）
     match result.device_state:                              # 状态更新经 repo（Session 不可变，同 transition 机制）

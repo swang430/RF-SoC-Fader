@@ -152,15 +152,15 @@ class DownlinkParser:
                 drop(len(self._buf) - keep)               #    只丢弃确定无用的部分，保留 ≤2B 尾巴等下一分片
                 break
     # tail_prefix_len(buf)：buf 的最长后缀同时是 b"FD B1 85" 真前缀的长度（0/1/2）
-            if i > 0: drop(i)                             #    前缀前垃圾→丢弃并计数
+            if i > 0: drop(i)                             #    前缀前垃圾→丢弃并计数（此后帧头对齐缓冲区起点）
             if len(self._buf) < 4: break                  # ② 等第 4 字节（帧型）
             kind = self._buf[3]
             need = expected_len(kind, self._buf)          # ③ 按帧型定长/取长度字段
             #    0x41→4+2+131+2；0xFF→7；0x69→4+2+len+2；0x50→4+1+len+2
-            if need is UNKNOWN_KIND: resync_from(i+1); continue   # 未知帧型→跳过前缀重同步
+            if need is UNKNOWN_KIND: drop(1); continue    # 未知帧型→丢 1 字节从头重扫（勿用陈旧偏移 i）
             if len(self._buf) < need: break               # ④ 数据不足→等下一分片
             frame, ok = decode(kind, self._buf[:need])    # ⑤ 校验帧尾 AE86 + 长度一致
-            if not ok: resync_from(i+1); continue         #    尾错→重同步（协议无 CRC，防错位）
+            if not ok: drop(1); continue                  #    尾错→丢 1 字节重同步（协议无 CRC，防错位）
             frames.append(frame); consume(need)
         return frames
 ```

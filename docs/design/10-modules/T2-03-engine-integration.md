@@ -36,6 +36,7 @@ GenerateRequest = {
   arrays: {tx: AntennaArray, rx: AntennaArray},      # schema 同《T1-03c》§4（序列化复用 M10）
   mobility: {speed_mps, direction_deg} | None,
   lsp_mode: "random" | "median",                     # median=确定性 LSP（可重复测试，引擎已支持）
+  delay_spread_s: float | None,                      # ★TDL-x/CDL-x 必填：RMS 时延扩展（缩放 delay_norm，《T1-03c》§5.4）
   seed: int,                                         # ★确定性契约：同 seed+config → 逐比特相同结果
   want_cir: {update_rate_hz, duration_s} | None,     # 时变 CIR（A 档数据）
   client_key: str,                                   # ★客户端幂等键（UUID）：POST 超时重试时引擎按此去重——
@@ -72,14 +73,18 @@ class ChannelEngineClient:
 
 def to_canonical(res, req) -> ChannelModel:
     # 统计场景(UMa/UMi/...) → level="GCM"(clusters)；CDL-x → level="CDL"(clusters)；
-    # TDL-x → level="TDL"：res.taps(delay_norm×DS→delay_s, power_db→线性, 谱型→rayleigh_spec) 直落 channels[].taps
+    # TDL-x → level="TDL"：res.taps(delay_norm×req.delay_spread_s→delay_s, power_db→线性, 谱型→rayleigh_spec)
+    #         直落 channels[].taps
     # clusters → Environment.links[].clusters[]（字段一一对应：delay_s/power_linear/角度[天顶]/xpr_db/k_factor）
-    # want_cir → time.mode="time_varying" + realization="CIR"
+    # ★want_cir → level="TDL" + realization="CIR"：引擎 CIR 本就是逐端口对实现——
+    #   按 req.arrays.port_map 键入 channels[(in,out)].taps.gain_series/cir_ref（10MB 规则），
+    #   不产 environment（schema 中 environment/channels 按 level 互斥，CIR 载荷只挂 channels）；
+    #   统计描述(lsps/clusters)入 provenance 供溯源
     # meta.arrays=req.arrays（自包含）；provenance={source_type:"ChannelEgine_38901",
     #   source_ref:f"{engine_version}", import_config:{**req, seed}}   # seed 入 provenance（可复现）
 ```
 
-- **两源统一兑现**：产出与 M4 同一 schema——GCM/CDL 模型交 **M5** 沿退化链降到 TDL（`reduce_GCM_to_CDL/reduce_CDL_to_TDL`，《T1-03b》§3）；TDL-x 直落 `channels[].taps`；CIR 交 AscCirBackend。
+- **两源统一兑现**：产出与 M4 同一 schema——GCM/CDL 模型交 **M5** 沿退化链降到 TDL（**M5 契约随本篇修订为接受 level∈{RT,GCM,CDL}**，簇路径见《T2-05》§2/§3 修订——原 RT-only 契约无法消费引擎产物）；TDL-x 直落 `channels[].taps`；CIR 交 AscCirBackend。
 - 角度约定核对：引擎输出 `zod_theta/zoa_theta` 即天顶角（OUTPUT_FORMAT_SPEC），**零换算**入 schema。
 
 ---

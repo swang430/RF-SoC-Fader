@@ -22,9 +22,15 @@ M5 实现 **`CorrelationSynthesizer` 策略**与 **RT→TDL 退化编排**：把
 
 ```python
 class CorrelationSynthesizer(Protocol):
-    def reduce_to_tdl(self, rt: ChannelModel, portmap: PortMap,
+    def reduce_to_tdl(self, model: ChannelModel, portmap: PortMap,
                       cfg: SynthesisConfig) -> tuple[ChannelModel, FidelityReport]: ...
-    # 输入 level=RT（M4 产出）；输出 level=TDL（taps+correlation），provenance.reduced_from=rt.id
+    # 输入 level ∈ {RT, GCM, CDL}（M4 的 RT / M3 引擎的 GCM/CDL——两源统一消费，T2-03 修订）；
+    # 输出 level=TDL（taps+correlation），provenance.reduced_from=model.id
+    #
+    # ★簇路径（level=GCM/CDL）：environment.links[].clusters[] 的簇中心角/功率/时延
+    #   视作"径集"执行与 §3 相同的导向/塌缩/量化/共享归一编排（引擎产出的簇已是带 seed 的
+    #   抽样实现，GCM 与 CDL 在退化上同构）；簇内角扩展本期不展开子径（记 FidelityReport，
+    #   子径展开为后续增强）；XPR/K 按簇透传入 Tap
 
 @dataclass(frozen=True)
 class SynthesisConfig:
@@ -43,7 +49,7 @@ class FidelityReport:                   # §5 数值核验产物
     quant: QuantReport                  # 量化丢弃统计（透传 M4）
 ```
 
-- 错误前置：`rt.level != "RT"` 拒；`single_reference` 而 `meta.arrays` 缺失拒；`mode=A` 走 §6 守卫。
+- 错误前置：`model.level ∉ {RT,GCM,CDL}` 拒（TDL 无需退化、CIR 走 A 档）；`single_reference` 而 `meta.arrays` 缺失拒；`mode=A` 走 §6 守卫。
 
 ---
 
@@ -146,7 +152,7 @@ class ATimeVaryingSynthesizer:      # stub：接口冻结，不实现
 
 | 触发 | 处置 |
 | :-- | :-- |
-| `rt.level != RT` / provenance 缺 portmap | 拒（明确指出应先走 M4 导入） |
+| `model.level ∉ {RT,GCM,CDL}` / provenance 缺 portmap | 拒（指明合法入口：M4 导入或 M3 引擎生成） |
 | 某信道对合并后 0 有效径 | 该信道对产出空 taps（M2 渲染为不使能该信道）+ FidelityReport 计数，不整体失败 |
 | `mode=A` + 设备无 CIR 能力 | CapabilityError（§6） |
 | 数值异常（NaN 传播/奇异 R） | 拒并报出问题径/信道对定位 |

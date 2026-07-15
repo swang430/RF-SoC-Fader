@@ -212,9 +212,12 @@ async def tweak(sess, channel: tuple[int,int], path: int | None,
     #   不入 per-channel tweak（跨信道副作用）：修改走 scenario 新 version 的 re-apply；
     #   使能类与 RESET 同样禁入：配置面不变式（configure-then-enable，T2-02 G0/G6）只归 apply 管
     frames = encode_tweak_frames(channel, path, params)     # M1 编码（物理量→码值→子帧→控制帧）
+    audit_begin(sess, who, digest(frames))                  # ★审计先行（T2-10 §6）：受理记录落盘失败
+                                                            #   → 拒绝执行（不触设备）——顺序不可倒，
+                                                            #   与 §4 apply 的 audit_begin→backend.apply 一致
     result = await backend.apply_micro(frames)              # M2 微帧通道（echo 纪律；device_state 语义同 apply）
     record = TweakRecord(now, who, channel, path, params, result)
-    audit_append(sess, record)                              # 审计无条件记录（含失败，T1-11 §3）
+    audit_end(sess, record)                                 # 终局补记（含失败；写失败→重试队列，T2-10 §6）
     match result.device_state:                              # 状态更新经 repo（Session 不可变，同 transition 机制）
         case "committed":   session_repo.append_tweak(sess, record)
             # ★仅 committed 进 tweaks 重放列表——未生效的微调不得成为「设备现态」的一部分

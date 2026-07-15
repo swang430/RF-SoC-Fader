@@ -107,7 +107,8 @@ def plan_frames(groups: list[Group], budget=4000) -> FramePlan:
     return FramePlan(frames=..., manifest=...)
 ```
 
-- **容量核算**（设计期验证可行性）：单信道满配 24 径 = G0(12B)+G1(~20B)+24×G3(~28B)+G5 ≈ 0.7KB → **单帧即可**；带瑞利 24×G4(1032B) ≈ 24.8KB → **约 8 帧**；64 信道满配另计（逐信道对顺序下发）。
+- **容量核算**（设计期验证可行性）：单信道满配 24 径 = G0(12B)+G1(~20B)+24×G3(~28B)+G5 ≈ 0.7KB → **单帧即可**；带瑞利 24×G4(1032B) ≈ 24.8KB → **约 8 帧**。
+- **★多信道 = 单一事务单一 FramePlan**：**RESET(13) 是全局复位**——若逐信道对各自成 FramePlan（各带 G0），配第 k 个信道会抹掉前 k−1 个的配置。正确结构：`G0+G1 仅一次（事务首帧）→ 逐信道对的 G2/G3/G4 组序列（io 各异）→ G5 一次（尾帧）`；64 信道满配为多帧、但**整个事务只含一个 RESET**。`plan_frames` 断言补充：**G0 在全计划中恰出现一次**且位于首帧之首。
 - 每帧经 M1 `build_control_frame` 封装（payload≤4000 由预算保证，双保险仍走 M1 校验）。
 
 ---
@@ -141,8 +142,13 @@ async def apply(self, plan: FramePlan) -> ApplyResult:
                                failure=at(idx, reason), ...)
     tele = await self._request_telemetry_once()                 # ID14=0x03 单次（VERIFYING 阶段独立下发，不在 G0）
     # ★0x03 = 「单次后关闭」（《T1-A1》）——取到核验帧后必须恢复周期节奏，
-    #   否则 §5 依赖的遥测活性信号熄灭：
-    await self._tx(encode_info_return(self._telemetry_cadence)) # 恢复 0x01/0x02（配置的周期档）
+    #   否则 §5 依赖的遥测活性信号熄灭。恢复帧自身也是控制帧（会产生回显），
+    #   必须同样等待并核验其 echo，否则残留队列会污染下一事务的匹配：
+    restore = encode_info_return(self._telemetry_cadence)       # 恢复 0x01/0x02（配置的周期档）
+    await self._tx(restore)
+    r_echo = await self._await_echo(timeout=ECHO_TIMEOUT)
+    if r_echo is TIMEOUT or not verify_copy_echo(restore, r_echo):
+        log.warning("cadence-restore echo 异常")                # 不回滚配置（已核验通过），但记告警并标记活性待观察
     if tele.adc_overrange or tele.combiner_overflow or tele.awgn_overflow:
         state = await self._rollback()                          # 同样可能 "dirty"，不得丢弃返回值
         return ApplyResult(committed=False, device_state=state,
@@ -203,7 +209,7 @@ async def readback() -> None
 
 | 类别 | 内容 | 判据 |
 | :-- | :-- | :-- |
-| **切分属性** | 随机模型生成 FramePlan：每帧 payload≤4000B；组不跨帧；顺序保持；G0 在首帧头、G5 在尾帧尾 | 属性全成立（含 24 径+瑞利满配 ≈8 帧 的边界例） |
+| **切分属性** | 随机模型（含**多信道对**）生成 FramePlan：每帧 payload≤4000B；组不跨帧；顺序保持；**G0 全计划恰一次**且在首帧头、G5 在尾帧尾 | 属性全成立（含 24 径+瑞利满配 ≈8 帧、64 信道多帧单 RESET 的边界例） |
 | **事务（假设备）** | 本地 asyncio TCP 假设备（回显/篡改 1 字节/超时/回错误帧/中途断连/遥测置溢出位六种剧本） | commit/rollback/**dirty** 判定与 FailureInfo 定位正确；可达时回滚必发 RESET；**断连剧本必须判 dirty 而非 rolled_back** |
 | **幂等** | 同一 FramePlan 连发两次 | 帧序列字节一致、结果一致 |
 | **dry-run** | render 不建立任何连接（socket 层断言） | 纯函数性 |

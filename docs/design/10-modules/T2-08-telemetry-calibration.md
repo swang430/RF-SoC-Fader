@@ -67,11 +67,13 @@ class TelemetryService:
 ### 3.1 瑞利谱型功率归一化（《T1-12》#2，硬件已确认）
 
 ```python
-def rayleigh_norm_gain(coeffs: complex[256], mode: Literal["per_tap","total"]) -> float:
+def rayleigh_norm_gain(taps_coeffs: Sequence[complex[256]],
+                       mode: Literal["per_tap","total"]) -> tuple[float, ...]:
     # 硬件行为：ID6 谱型改变 → 信道总功率随谱能量改变（2026-07-14 确认）
-    # 补偿：norm_gain = sqrt(E_ref / E(coeffs))，E(coeffs)=Σ|c_k|²——写系数时按此缩放幅度，
-    #   保持目标功率不变。mode 对应硬件答复的两种归一化基准：
-    #   per_tap=按当前写入 Tap 归一（默认）；total=按信道总体 Tap 归一（多径联合谱配置时用）
+    # 入参=该信道【全部】启用瑞利的 Tap 的系数（total 模式必须跨 Tap 联合——单 Tap 入参无从归一）
+    # 补偿（E(c)=Σ|c_k|²），返回与入参等长的增益序列：
+    #   per_tap（默认）：gain_i = sqrt(E_ref / E(c_i))——逐 Tap 独立归一（各异）
+    #   total：g = sqrt(E_ref_total / Σ_i E(c_i))，全部 Tap 共用同一 g（保持 Tap 间相对功率分布）
     # 消费点：M2 render 组 ID6/ID7 子帧时调用（T2-05 rayleigh hook 的落点）；实现期以实测校核 E_ref
 ```
 
@@ -105,8 +107,11 @@ def input_level_advice(signal_papr_db: float = DEFAULT_PAPR_5G) -> LevelAdvice:
 ```python
 def overflow_guard(snap: TelemetrySnapshot) -> list[Advice]:
     # combiner/awgn 溢出位 → 定位输出端与成因 → 建议：
-    #   「输出 o 合路溢出：建议输出衰减增加 ≥X dB（当前含噪功率 P → 目标 ≤ 满幅−余量）」
-    #   X 由含噪功率与满幅域（output_level 上限 32768，1/16384 步进）反推
+    #   「输出 o 合路溢出：建议输出衰减增加 ≥X dB」
+    #   ★X 全程在【遥测读数域】反推：X = 20·log10(output_level_o / target_level)，
+    #     满幅参考=遥测 level 域上限 32768，target=满幅−安全余量——读数域自洽，
+    #     不掺写域刻度；写侧落地时 X dB→ID11 衰减码值（1/16384 为【写域】步进）另行
+    #     换算（调 M1 唯一定义）——两域不得混算
     # Advice 作为事件入遥测流（GUI 展示、用户决策）；自动降幅列开放问题（§8-4，与 M6 协同）
 ```
 
@@ -121,7 +126,7 @@ def overflow_guard(snap: TelemetrySnapshot) -> list[Advice]:
 ```python
 TelemetryService.get_snapshot(device_id) -> TelemetrySnapshot | None
 TelemetryService.subscribe(device_id, last_event_id=None) -> AsyncIterator[TelemetryEvent]
-CalibrationService.rayleigh_norm_gain(coeffs, mode="per_tap") -> float
+CalibrationService.rayleigh_norm_gain(taps_coeffs, mode="per_tap") -> tuple[float, ...]
 CalibrationService.bypass_atten_db(mode) -> float            # UncalibratedError 语义
 CalibrationService.input_level_advice(papr_db=...) -> LevelAdvice
 CalibrationService.overflow_guard(snapshot) -> list[Advice]
@@ -158,7 +163,7 @@ CalibrationService.overflow_guard(snapshot) -> list[Advice]
 | **告警迟滞** | 阈值上下抖动序列 | 单次 raised/cleared，无告警风暴 |
 | **续传/重同步** | 窗内 last_event_id / 窗外 / 慢消费者 | 窗内无缝续传；窗外与慢消费均首发 resync |
 | **活性** | 停喂帧 > K×周期 | `device_silent` 触发；恢复喂帧后清除 |
-| **谱归一黄金** | Jakes 谱与平坦谱各一组 coeffs | norm_gain 与解析能量比一致（1e-12 容差）；per_tap/total 两模式 |
+| **谱归一黄金** | Jakes 谱与平坦谱混合的多 Tap 系数组 | 增益与解析能量比一致（1e-12 容差）；per_tap 逐 Tap 各异、total 全同且保持 Tap 间相对功率 |
 | **bypass 未标定** | None 表调用 | UncalibratedError 且指明 N2 |
 | **电平指引** | PAPR 参数扫描（含 >10 dB） | 建议区间单调、不超 ADC 上限；PAPR>10 dB 返回 feasible=False（绝不产生倒置区间） |
 | **溢出建议** | 构造合路溢出快照 | Advice 定位正确、建议衰减量 ≥ 反推下限 |

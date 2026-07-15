@@ -95,9 +95,11 @@ def import_mpdb(source, arrays: {tx: AntennaArray, rx: AntennaArray},
                 portmap: PortMap, cfg: ImportConfig,
                 target_caps: BackendCapabilities) -> tuple[ChannelModel, ImportReport]:
     raw = mpdb_reader.load(source)                       # §2
-    validate_link_table(raw.links, portmap.link_mode, arrays,   # §3.1 分模式核验（端点集合/单链路）
+    resolution = validate_link_table(raw.links, portmap.link_mode, arrays,  # §3.1 分模式核验（端点集合/单链路）
                         identity_by=cfg.identity_by,            # 身份解析策略与容差随调用显式传入
                         epsilon_m=cfg.position_epsilon_m)
+    # resolution: link_id → (tx_elem, rx_elem)。★解析结果必须回填模型（见下 Link 构造）——
+    # position 模式下原始 TX/RX 是设备端点号，若原样入模型，M5 按阵元号消费会错位
     validate_portmap(portmap, ValidationContext(                # §3.2 V1–V6：上下文完整传入——
         grid_topology=cfg.topology, path_expansion_enabled=cfg.path_expansion,
         capabilities=target_caps, test_mode=cfg.test_mode, arrays=arrays))
@@ -110,7 +112,9 @@ def import_mpdb(source, arrays: {tx: AntennaArray, rx: AntennaArray},
         time=TimeAxis(mode="static"),                               # 本期单快照
         grid=Grid(topology=cfg.topology, channel_pairs=portmap.used_pairs()),
         environment=Environment(links=[
-            Link(link_id=l.id, tx_index=l.tx, rx_index=l.rx,
+            Link(link_id=l.id,
+                 tx_index=resolution[l.id].tx_elem,             # ★解析后的阵元号（非原始设备端点号）
+                 rx_index=resolution[l.id].rx_elem,             #   原始 TX/RX 端点号随 provenance 保留可溯
                  tx_pos_m=l.tx_pos, rx_pos_m=l.rx_pos,
                  rays=[Ray(delay_s=r.delay, gain=r.H,               # ★物理量原样；复数=单极化标量
                            aoa_az_deg=r.AOA, aoa_zen_deg=r.ZOA,     # ★天顶角保留

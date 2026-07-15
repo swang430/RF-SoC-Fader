@@ -115,7 +115,8 @@ async def resolve(sess) -> ResolvedArtifacts:
     backend = registry.backend_of(sess)                                  # rfsoc(device) | asc
     caps = backend.capabilities
     if (hit := artifact_cache.get(scen.scenario_id, scen.version, sess.backend, digest(caps))):
-        transition(sess, to=READY); return hit                           # ★幂等缓存：命中即跳 ①②④
+        set_artifacts(sess, hit)                                         # ★幂等缓存：命中即跳 ①②④
+        transition(sess, to=READY); return hit
 
     # ① materialize：三源归一到 canonical model（各附报告）
     match scen.source:
@@ -142,7 +143,8 @@ async def resolve(sess) -> ResolvedArtifacts:
     model_repo.put(model)                                # 内容寻址入库（provenance 链锚点，M10）
     arts = ResolvedArtifacts(model.id, artifact, hash_of(artifact), collect_reports(rep, fidelity))
     artifact_cache.put(..., arts)
-    transition(sess, to=READY); return arts
+    set_artifacts(sess, arts)            # ★先落 Session 再发布 READY——轮询方见 READY 即产物可取
+    transition(sess, to=READY); return arts        #   （READY 早于 artifacts 落库=下载/dry-run 竞态）
 
 async def apply(sess, dry_run=False, auto_resolve=True) -> ApplyResult | Manifest:
     if dry_run:                          # dry-run：返回缓存 manifest——零设备触达（T1-04）、同步快返
@@ -151,8 +153,8 @@ async def apply(sess, dry_run=False, auto_resolve=True) -> ApplyResult | Manifes
                                                          #   路径：InvalidStateError(allowed_ops=[resolve])
         return manifest_of(sess.artifacts.artifact)      # RFSoC：帧摘要/字节数；asc：文件预览
     if sess.state == CREATED and auto_resolve:            # ★复合语义归 M6：CREATED 直接 apply 时先物化再下发
-        set_artifacts(sess, await resolve(sess))          #   （M7 零业务逻辑；状态迁移在 resolve 本体——
-                                                          #   RESOLVING→READY 对轮询方与单独 resolve 一致可观测）
+        await resolve(sess)                               #   （M7 零业务逻辑；artifacts 落库与状态迁移都在
+                                                          #   resolve 本体——与单独 resolve 一致可观测）
     if sess.device_id is not None:                       # asc 无设备语义，跳过租约
         leases.try_acquire(sess.device_id, owner=sess.session_id)
         # ★非阻塞租约（§3）：他会话持有→立即 raise DeviceBusy(holder)；本会话已持有→幂等继续。
@@ -162,7 +164,11 @@ async def apply(sess, dry_run=False, auto_resolve=True) -> ApplyResult | Manifes
     result = await backend.apply(sess.artifacts.artifact)                # M2 事务（echo/遥测在其内）
     audit_end(sess, result)
     transition(sess, by=result.device_state)             # committed→ACTIVE / rolled_back→READY
-    return result                                        #   / dirty→DEVICE_DIRTY
+                                                         #   / dirty→DEVICE_DIRTY
+    if result.device_state in {"committed", "rolled_back"}:
+        clear_tweaks(sess)   # ★基线不变式（§4bis）：committed=设备回 artifact 基线、rolled_back=设备被
+                             #   RESET 清空——旧 tweaks 均已不在设备上；dirty 暂留供诊断（recover 终局再清）
+    return result
 
 # ★异步提交面（供 M7 的 202 语义）：长耗时操作由 M6 任务运行器承载——网关不持协程、不追踪任务
 def submit_resolve(sess) -> OperationRef: ...

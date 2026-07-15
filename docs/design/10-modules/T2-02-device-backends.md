@@ -84,9 +84,10 @@ class ApplyResult:
 G0 前导组   : RESET(13) [+COPY_RETURN(15)=1]                       # 必须整组位于第一帧之首
              # ★INFO_RETURN(14) 不入 G0：单次遥测请求(0x03)由 apply 在 VERIFYING 阶段独立下发——
              #  若随首帧发出，多帧场景下设备在第一帧后即回遥测（反映部分配置），污染核验（§4）
-G1[out] 输出参数组: OUTPUT_ATTEN(11)+AWGN(8/9)                     # 按输出端（io=0/out），每使用输出端一组
-             # ★不含任何使能——见 G6
-G6 使能组   : OUTPUT_ENABLE(10)×每使用输出端 + GLOBAL_ENABLE(1)     # ★全部写入完成后才使能（最后一帧之尾）——
+G1[out] 输出参数组: OUTPUT_ATTEN(11)+AWGN_POWER(9)                 # 按输出端（io=0/out），每使用输出端一组
+             # ★不含任何使能（AWGN_ENABLE(8) 也是使能，归 G6）——见 G6
+G6 使能组   : [AWGN_ENABLE(8)×需开噪声的输出端 +] OUTPUT_ENABLE(10)×每使用输出端 + GLOBAL_ENABLE(1)
+             # ★全部写入完成后才使能（最后一帧之尾）——
              # 帧独立生效（T1-12 #5）：若使能在首帧，设备会带着半套配置**提前对外发射**；
              # 「先配置、后使能」使多帧中间态始终静默
 G2[ch,k] 清径组: PATH_ENABLE(2)=0                                   # ★仅清「本计划不写」的残留径——

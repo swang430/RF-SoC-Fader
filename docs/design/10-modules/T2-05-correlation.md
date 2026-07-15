@@ -1,0 +1,180 @@
+# T2-05 · M5 相关性合成（功能设计）
+
+> 第二册《功能设计》· 第 5 篇（L3 · 旗舰 B 方案核心算法）
+> 状态：草稿 v0.1 · 待评审
+> 依据：《T1-06 MIMO 相关性（§6bis B 方案端到端）》《T1-03b 退化链》《T1-03c schema》（冻结基线）；依赖 **M4（T2-04）** 的 RT 模型/PortMap/量化合并函数集
+> 消费方：M6（编排调用）、M2（消费产出的 TDL 模型渲染）、M11（R 热图可视化）
+
+---
+
+## 1. 概述与定位
+
+M5 实现 **`CorrelationSynthesizer` 策略**与 **RT→TDL 退化编排**：把 M4 产出的 `level=RT` 模型退化为 `level=TDL` 模型（taps + 相关矩阵 R），落实《T1-06》B 方案 Phase 2–6 与三条正确性要点。
+
+- **B 档（默认实现）**：几何/确定性相关精确复现 + 衰落边缘统计——本篇主体。
+- **A 档（预留 stub）**：time_varying+CIR 载荷,守卫按 capabilities 拒绝（《T1-12》#1）。
+
+**非职责**：MPDB 读取/PortMap 校验/量化合并机制（→M4，本篇只编排调用）；协议码值与下发（→M2/M1）；瑞利谱型功率归一化的数值标定（→M8，本篇留 hook）。
+
+---
+
+## 2. 接口契约
+
+```python
+class CorrelationSynthesizer(Protocol):
+    def reduce_to_tdl(self, rt: ChannelModel, portmap: PortMap,
+                      cfg: SynthesisConfig) -> tuple[ChannelModel, FidelityReport]: ...
+    # 输入 level=RT（M4 产出）；输出 level=TDL（taps+correlation），provenance.reduced_from=rt.id
+
+@dataclass(frozen=True)
+class SynthesisConfig:
+    mode: Literal["B"]                  # A 档另走 ATimeVaryingSynthesizer（§6）
+    power_mode: Literal["coherent","noncoherent"]
+    max_paths: int                      # ≤ 目标 capabilities.max_paths
+    velocity_mps: Vec3 | None           # 几何多普勒（可选，《T1-05》§5）
+    rayleigh: RayleighSpecConfig | None # 衰落边缘统计（可选；功率归一化 hook→M8）
+
+@dataclass(frozen=True)
+class FidelityReport:                   # §5 数值核验产物
+    r_target: ndarray                   # 目标 R（角度+几何直接计算）
+    r_realized: ndarray                 # 由产出 taps 反构的 R̂
+    frobenius_rel_err: float            # ‖R̂−R‖F / ‖R‖F
+    per_channel_tap_counts: Mapping[tuple[int,int], int]
+    quant: QuantReport                  # 量化丢弃统计（透传 M4）
+```
+
+- 错误前置：`rt.level != "RT"` 拒；`single_reference` 而 `meta.arrays` 缺失拒；`mode=A` 走 §6 守卫。
+
+---
+
+## 3. B 方案编排（核心伪代码，落实《T1-06》§6bis）
+
+```python
+def reduce_to_tdl(rt, portmap, cfg):
+    lam = C / rt.meta.center_frequency_hz                        # λ = c/fc
+    pairs = {}                                                    # (in,out) → 阵元对射线集（复增益已含导向相位）
+
+    if portmap.link_mode == "per_element_pair":
+        # RT 已逐阵元对算径（几何真值，含近场效应）——无需导向合成
+        for link in rt.environment.links:
+            io = portmap.map(link.tx_index, link.rx_index)        # ElementKey→(input,output)
+            pairs[io] = [(r.delay_s, r.gain, angles(r)) for r in link.rays]
+    else:  # single_reference：Phase 2 导向合成（★必须先于量化合并——正确性要点 1）
+        ref = rt.environment.links[0]
+        for m in tx_elements(rt.meta.arrays):
+            for n in rx_elements(rt.meta.arrays):
+                io = portmap.map(m, n)
+                pairs[io] = [
+                    (r.delay_s,
+                     r.gain * steer(rt.meta.arrays.tx, m, r.aod_az_deg, r.aod_zen_deg, lam)
+                            * conj(steer(rt.meta.arrays.rx, n, r.aoa_az_deg, r.aoa_zen_deg, lam)),
+                     angles(r))
+                    for r in ref.rays]
+
+    # Phase 3：逐信道对 量化→合并→选径（调 M4 函数集；输入已带导向相位）
+    binned = {}
+    for io, rays in pairs.items():
+        codes, quant = quantize_delays([d for d,_,_ in rays])     # 超范围丢弃+计数（M4 契约）
+        bins = merge_bins(codes, gains)                           # 同 bin 复增益相干叠加（保相位）
+        binned[io] = select_strongest(bins, k=cfg.max_paths, power_mode=cfg.power_mode)
+
+    # Phase 4：★全系统共享归一化基准（正确性要点 2）——先全局扫描再归一
+    ref_power = max(max(b.power for b in bins) for bins in binned.values())
+    taps = {io: normalize(bins, ref=sqrt(ref_power)) for io, bins in binned.items()}
+
+    # Phase 5：目标相关矩阵（供核验/GUI；R 不进设备帧——《T1-03b》）
+    R_tx, R_rx = correlation_from_angles(rt, rt.meta.arrays, lam)  # §4
+    R = kron(R_tx, R_rx)
+
+    # 可选：几何多普勒 f_d=(v·k̂_arr)/λ 逐径；瑞利谱 spec（功率归一化交 M8 hook）
+    apply_doppler_and_rayleigh(taps, cfg, lam)
+
+    tdl = assemble_tdl_model(rt, taps, correlation=(R_tx,R_rx,R), reduced_from=rt.id)
+    return tdl, verify_fidelity(tdl, R, quant)                    # §5
+```
+
+**方向矢量约定**（天顶角体系，《T1-03c》）：`k̂(φ,θ) = [sinθ·cosφ, sinθ·sinφ, cosθ]`；
+`steer(array, m, φ, θ, λ) = exp(j·2π/λ · p_m · k̂(φ,θ))`。全程 complex128。
+
+**两模式的语义差异**（诚实边界）：`per_element_pair` 是 RT 几何真值（含近场/遮挡差异）；`single_reference` 是**远场平面波近似**下的导向合成——近场场景两者会偏离，模型选择责任在导入方（M4 已核验形态，本篇在 FidelityReport 注记所用模式）。
+
+---
+
+## 4. 目标相关矩阵计算（《T1-06》§2 落地）
+
+```python
+def correlation_from_angles(rt, arrays, lam):
+    # 径集：per_element_pair 用参考功率谱（所有链路射线并集）；single_reference 用参考链路
+    R_tx = Σ_k P_k · a_tx(φ_dep,k, θ_dep,k) · a_tx(...)ᴴ         # M_tx×M_tx
+    R_rx = Σ_k P_k · a_rx(φ_arr,k, θ_arr,k) · a_rx(...)ᴴ
+    R_tx /= trace(R_tx)/M_tx ; R_rx /= trace(R_rx)/M_rx           # 对角归一
+    return R_tx, R_rx
+```
+- 存入 `model.correlation{source="angles_geometry", r_tx, r_rx, r}`（物化缓存，《T1-03c》§6——主来源仍是角度+几何，可复算）。
+- Kronecker 为可分离近似；非可分离升级路径见《T1-06》§2.3（接口不变）。
+
+---
+
+## 5. 数值核验（Phase 8 落地，验收核心）
+
+```python
+def verify_fidelity(tdl, R_target, quant) -> FidelityReport:
+    H = reconstruct_H(tdl)          # 由 taps 复增益反构窄带 MIMO 矩阵：H[m,n] = Σ_k gain_k(io=map(m,n))
+    R_hat = outer(vec(H), conj(vec(H)))                # 单快照实现相关（确定性分量）
+    R_hat /= trace(R_hat)/dim
+    err = frobenius(R_hat - R_target) / frobenius(R_target)
+    return FidelityReport(..., frobenius_rel_err=err, ...)
+```
+- **验收阈值**：理想 fixture（无量化）err ≈ 0（<1e-10）；经 24 径截断+时延量化后 err 上报不判死（阈值由场景验收定，GUI 展示）。
+- 该函数亦供 M11 可视化（R vs R̂ 热图并排）与 T3 回归。
+
+---
+
+## 6. A 档预留与守卫
+
+```python
+class ATimeVaryingSynthesizer:      # stub：接口冻结，不实现
+    def reduce_to_tdl(...): raise CapabilityError(
+        "correlation.mode=A 需设备支持 CIR 注入；当前 RF-SoC 不支持（T1-12 #1）。"
+        "可改用 AscCirBackend 导出 .asc，或使用 mode=B")
+```
+- 选择逻辑：`mode=A` 且目标 backend `supports_cir=False` → 上述错误（render 前拒，不触设备）；`supports_cir=True`（未来设备/固件）→ 按 capabilities 放行（《T1-12》§0 通用 fader 原则）。
+
+---
+
+## 7. 错误处理
+
+| 触发 | 处置 |
+| :-- | :-- |
+| `rt.level != RT` / provenance 缺 portmap | 拒（明确指出应先走 M4 导入） |
+| 某信道对合并后 0 有效径 | 该信道对产出空 taps（M2 渲染为不使能该信道）+ FidelityReport 计数，不整体失败 |
+| `mode=A` + 设备无 CIR 能力 | CapabilityError（§6） |
+| 数值异常（NaN 传播/奇异 R） | 拒并报出问题径/信道对定位 |
+
+---
+
+## 8. 测试设计（本模块）
+
+| 类别 | 内容 | 判据 |
+| :-- | :-- | :-- |
+| **黄金几何（解析例）** | 2×2 半波长 ULA、单径 broadside(θ=90°,φ=0)：R 应为全 1 秩 1 矩阵；斜入射角 θ 已知：阵元间相位差 = 2π/λ·d·cosθ（天顶角约定） | 与解析值逐元素 ≤1e-10 |
+| **顺序纪律** | 同一 fixture "先导向后合并" vs 反序 | 反序结果偏离解析值、正序命中（要点 1 的可测化） |
+| **共享基准** | 两信道对功率比已知的 fixture | 归一化后相对功率保持（非各自归 1）（要点 2） |
+| **两模式一致性** | 远场平面波 fixture 同时构造 per_element_pair 真值与 single_reference 合成 | 两者 taps/R 偏差 ≤ 容差；近场 fixture 允许偏离并在报告注记 |
+| **保真闭环** | verify_fidelity：理想 fixture err<1e-10；量化/截断后 err 单调合理 | 阈值与单调性 |
+| **多普勒** | velocity 注入：f_d = v·k̂/λ 逐径解析对照 | 数值一致 |
+| **A 档守卫** | mode=A × RFSOC_CAPS | CapabilityError，零副作用 |
+| **空信道对** | 某 io 全径被量化丢弃 | 空 taps + 计数，整体不失败 |
+
+---
+
+## 9. 开放问题
+1. **Kronecker vs 全相关**：可分离近似的精度边界（《T1-06》§7-4）；FidelityReport 已给量化手段，阈值随场景验收定。
+2. **近场**：single_reference 平面波近似在近场的误差界；建议近场场景一律要求 per_element_pair 输入（导入侧提示归 M4/M11）。
+3. **XPR 来源**：RT 单极化 H 无 XPR 信息，传导模式 Tap.xpr_db 留空/用户配置；HyperRT 极化输出落地后升级（《T2-04》§8-2）。
+4. **瑞利谱与 M8 衔接**：spec 写入时的谱型功率归一化系数由 M8 提供（《T1-12》#2），本篇仅留 hook。
+
+## 10. 本篇验收
+- 黄金几何解析例全绿（含顺序纪律与共享基准的可测化验证）。
+- 一条 MPDB 链路经 M4→M5 产出 level=TDL 模型：taps+R 完整、provenance 可溯、M2 可直接渲染。
+- verify_fidelity 闭环可量化 B 档保真度，供 GUI/T3 消费。

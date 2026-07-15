@@ -30,7 +30,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `/scenarios` | GET/POST | scenario_repo 列表/创建（version=1） | read/write | 同步 |
 | `/scenarios/{id}` | GET(`?version=`)/PUT/DELETE | 读指定版；**PUT=创建新 version**（版本不可变，T2-06 §2）；DELETE=**归档**（被会话/审计引用，禁止物理删） | read/write | 同步 |
 | `/sessions` | POST `{scenario_id, version, device_id?, backend}` | M6 create（锁定版本） | control | 同步 |
-| `/sessions/{id}` | GET | 状态机态 + reports + last_apply + **last_error**（异步失败的结构化错误，T2-06 §2——RESOLVE_FAILED 等终态的唯一定位来源，直译 §3 problem+json 扩展字段）+ tweaks | read | 轮询 |
+| `/sessions/{id}` | GET | 状态机态 + **current_op / last_completed_op**（客户端 wait 的 op 关联锚点，T2-06 §2——防 re-apply 旧态误判）+ reports + last_apply + **last_error**（异步失败的结构化错误，T2-06 §2——RESOLVE_FAILED 等终态的唯一定位来源，直译 §3 problem+json 扩展字段）+ tweaks | read | 轮询 |
 | `/sessions/{id}/resolve` | POST | M6 `submit_resolve`（任务在 M6 运行器内，网关不持协程，T2-06 §4 提交面） | control | **202** |
 | `/sessions/{id}/apply` | POST `?dry_run=` | M6 `submit_apply(auto_resolve=True)`——CREATED 态由 **M6 内部**先 resolve 再 apply；dry_run=true 走同步 `apply(dry_run=True)` 直返 manifest（**仅 READY/ACTIVE**：CREATED 时 M6 抛 InvalidState → 409 指明先 resolve——物化长耗时不得混入同步路径）。网关不检查状态、不编排、不持协程（单次 L3 调用） | control | 202（dry_run 同步返 manifest） |
 | `/sessions/{id}/artifact` | GET `?channel=&format=` | **产物下载**（READY 起可用，M6 artifacts 缓存直出、零设备触达）：asc→全信道 zip 或 `?channel=i_o` 单文件 text/plain；rfsoc→帧序列 octet-stream 或 `?format=manifest` 摘要 JSON。CI 黄金对比与《T1-04》G4「同 scenario 产两种后端产物」的取回面（SDK `apply(out=...)` 即封装此端点落盘）；CREATED 态 → 409 指明先 resolve | read | 同步 |

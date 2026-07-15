@@ -74,7 +74,9 @@ def rayleigh_norm_gain(taps_coeffs: Sequence[complex[256]],
     # 补偿（E(c)=Σ|c_k|²），返回与入参等长的增益序列：
     #   per_tap（默认）：gain_i = sqrt(E_ref / E(c_i))——逐 Tap 独立归一（各异）
     #   total：g = sqrt(E_ref_total / Σ_i E(c_i))，全部 Tap 共用同一 g（保持 Tap 间相对功率分布）
-    # 消费点：M2 render 组 ID6/ID7 子帧时调用（T2-05 rayleigh hook 的落点）；实现期以实测校核 E_ref
+    # 消费点：★L3 退化管线（T2-05 apply_doppler_and_rayleigh 的「功率归一化 hook→M8」落点，
+    #   M5 调用本【纯函数】）——归一化在入模前完成，交给 M2 的模型已含补偿后幅度；
+    #   M2 纯渲染不回调 M8（否则 M2↔M8 循环依赖——M8 依赖 M2 仅遥测分发单向）。实测校核 E_ref 于实现期
 ```
 
 ### 3.2 bypass 衰减校准表（《T1-12》N2，结构先行）

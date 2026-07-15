@@ -51,6 +51,7 @@ class Session:
     state: SessionState                       # §3 状态机
     artifacts: ResolvedArtifacts | None       # resolve 产物缓存
     last_apply: ApplyResult | None            # M2 结果原样保留（含 device_state / telemetry）
+    tweaks: tuple[TweakRecord, ...]           # ACTIVE 期微调记录（§4bis）：设备现态=artifact+tweaks 按序重放
     audit: tuple[AuditRecord, ...]            # 触达设备操作全记录：谁·何时·帧摘要·结果（T1-11 §3）
 
 @dataclass(frozen=True)
@@ -91,7 +92,7 @@ class ResolvedArtifacts:
 | RESOLVE_FAILED · CLOSED | 终态（CLOSED 释放设备租约） | —— |
 
 - **设备互斥＝租约（lease），不是锁**：首次 `apply` 时向 `DeviceLeaseRegistry` **非阻塞 try-acquire**——已被他会话持有 → 立即 `DeviceBusy`（含持有者 session_id），**不排队**（asyncio.Lock 会排队等待，语义不符，不采用）；本会话已持有（re-apply）→ 幂等继续。**租约生命周期与 apply 调用解耦**：一经取得，无论结果（ACTIVE / rolled_back 回 READY / DEVICE_DIRTY）都由本会话持续持有——设备的后续状态由本会话负责收拾——直至 close（或 asc 后端无设备语义）才释放。不同设备并行不受限（《T1-10》单机多会话）。`readback` 只读，不受租约限制（M8 遥测同理）。
-- **close 策略**：`close(release="disable" | "leave" | "reset")`，默认 **disable**——经 M2 微帧通道下发「全局使能关」（复用 T2-02 build_control_frame + echo 纪律，同遥测节奏恢复机制），配置保留、可快速重启；`reset`=RESET 清态；`leave`=仅释放租约（交接给外部测量流程时用）。**★自 DEVICE_DIRTY 进入 close 强制 `reset`**：`disable`/`leave` 一律拒（`InvalidCloseError`）——设备状态未知时，「仅关使能」预设了残留配置可信、「原样交接」把未知状态转嫁给下一租约持有者，均不成立；必须 RESET 重建已知基线后才释放租约（与 M2 dirty 语义「重连后须先 RESET 才可信」一致）。asc 后端 close 无设备语义（直接 CLOSED）。
+- **close 策略**：`close(release="disable" | "leave" | "reset")`，默认 **disable**——经 M2 微帧通道（`apply_micro`，T2-02 契约）下发「全局使能关」（echo 纪律同 apply，同遥测节奏恢复机制），配置保留、可快速重启；`reset`=RESET 清态；`leave`=仅释放租约（交接给外部测量流程时用）。**★自 DEVICE_DIRTY 进入 close 强制 `reset`**：`disable`/`leave` 一律拒（`InvalidCloseError`）——设备状态未知时，「仅关使能」预设了残留配置可信、「原样交接」把未知状态转嫁给下一租约持有者，均不成立；必须 RESET 重建已知基线后才释放租约（与 M2 dirty 语义「重连后须先 RESET 才可信」一致）。asc 后端 close 无设备语义（直接 CLOSED）。
 - **重启恢复**：会话经 M10 持久化；进程重启后 ACTIVE/APPLYING 一律降为 **DEVICE_DIRTY**（重启期间设备真实状态未知，须 recover 重建信任——与 M2 dirty 语义一致，不得谎称仍然可信）。
 
 ---
@@ -148,6 +149,25 @@ async def apply(sess, dry_run=False) -> ApplyResult | Manifest:
 ```
 
 - **幂等**（《T1-11》§1）：同 scenario@version（seed 固定）→ 同 model_id → 同 artifact_hash → 重复 apply 下发**逐字节相同**的帧序列。
+
+### 4bis. ACTIVE 期微调（tweak——支撑《T1-04》`/channels PATCH` 与 GUI 微调、《T1-11》§3「apply/微调/复位」审计口径）
+
+```python
+async def tweak(sess, channel: tuple[int,int], path: int | None,
+                params: TweakParams) -> ApplyResult:
+    # 前置：sess.state == ACTIVE（已持有租约）；rfsoc 后端限定（asc 无「运行中设备」语义）
+    # TweakParams 仅限逐径/逐信道物理量（主时延/幅度/相位/多普勒/AWGN/输出衰减）——
+    #   使能类与 RESET 禁入：配置面不变式（configure-then-enable，T2-02 G0/G6）只归 apply 管
+    frames = encode_tweak_frames(channel, path, params)     # M1 编码（物理量→码值→子帧→控制帧）
+    result = await backend.apply_micro(frames)              # M2 微帧通道（echo 纪律；失败分流同 §4：
+    record = TweakRecord(now, who, channel, path, params, result)   #   dirty→DEVICE_DIRTY）
+    session_repo.append_tweak(sess, record)                 # 状态更新经 repo（Session 不可变，同 transition 机制）
+    return result
+```
+
+- **复现语义**：设备现态 = artifact（base apply）+ `tweaks` 按序重放——tweak 不改 scenario、不改 artifact_hash，偏离被**显式记录**而非篡改基线（配置即数据不破坏；重放=`apply → 逐条 tweak`）。
+- **视图**：逐信道参数视图 = artifact 参数 + tweaks 叠加（M7 `/channels` GET 以此表达）。
+- re-apply 会重置设备到 artifact 基线：**re-apply 后 `tweaks` 清空**（其效果已被覆盖，留在审计里）。
 - **报告透传**：Import/Engine/Fidelity/Quant 报告随 ResolvedArtifacts 全量保留——GUI ④面板与验收都以此为据，M6 不摘要不吞。
 
 ---

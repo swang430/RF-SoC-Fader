@@ -48,6 +48,11 @@ class DeviceBackend(Protocol):
     async def apply(self, artifact: Artifact) -> ApplyResult: ...
         # ★异步：送达设备（事务化，内部全 async TCP）或写文件；与 §4 实现签名一致
     async def readback(self) -> TelemetryFrame | None: ...   # asc: None
+    async def apply_micro(self, frames: tuple[bytes, ...]) -> ApplyResult: ...
+        # ★微帧通道：不经 FramePlan 分组编排的小控制帧直发——echo 纪律与失败分流同 apply，
+        #   但无 G0(RESET)/G6(使能) 编排（帧内容由调用方负责合法性）。用途：遥测节奏恢复
+        #   （§4 VERIFYING 内部同机制）、会话 close(disable) 与 ACTIVE 期微调（T2-06）。
+        #   属既有 build_control_frame+echo 机制的接口化导出，非新设备能力；asc 后端不支持（抛 CapabilityError）
 
 # 产物与结果
 @dataclass(frozen=True)

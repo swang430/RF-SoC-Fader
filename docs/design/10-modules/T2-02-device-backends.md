@@ -142,7 +142,15 @@ async def apply(self, plan: FramePlan) -> ApplyResult:
             state = await self._rollback()   # 尝试 RESET；连接已死/发送失败→返回 "dirty"
             return ApplyResult(committed=False, device_state=state,   # "rolled_back" | "dirty"
                                failure=at(idx, reason), ...)
-    tele = await self._request_telemetry_once()                 # ID14=0x03 单次（VERIFYING 阶段独立下发，不在 G0）
+    # —— VERIFYING：单次遥测请求（不在 G0）。请求帧自身也是控制帧 → 先取走并核验它的回显，
+    #    再等遥测帧；否则该 echo 残留队列，会被后续 cadence-restore 的等待错误消费（★P1）：
+    req = build_control_frame([SubFrame(ParamID.INFO_RETURN, u8(0x03))])
+    await self._tx(req)
+    q_echo = await self._await_echo(timeout=ECHO_TIMEOUT)
+    if q_echo is ERROR_FRAME or q_echo is TIMEOUT or not verify_copy_echo(req, q_echo):
+        state = await self._rollback()                          # 请求未被正确接收 → 按协议错误回滚
+        return ApplyResult(committed=False, device_state=state, failure=at("telemetry_req", reason), ...)
+    tele = await self._await_telemetry(timeout=TELEMETRY_TIMEOUT)   # 等 0xFDB18541 遥测帧
     # ★0x03 = 「单次后关闭」（《T1-A1》）——取到核验帧后必须恢复周期节奏，
     #   否则 §5 依赖的遥测活性信号熄灭。恢复帧自身也是控制帧（会产生回显），
     #   必须同样等待并核验其 echo，否则残留队列会污染下一事务的匹配：

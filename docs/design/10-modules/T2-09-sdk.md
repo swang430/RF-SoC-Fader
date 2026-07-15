@@ -56,8 +56,8 @@ for ev in cep.telemetry.stream(device="dev0"):                # GET /telemetry/s
 ```
 
 - **`wait()` 语义（终态按操作限定，不设通则）**：轮询 `poll_url`（指数退避，尊重服务端 202 约定）；**以 op_id 关联终局**——202 返回的 op_id 是等待锚点，`op_id ∈ session.completed_ops`（有界历史）才算「本操作」终局，outcome **及失败细节（OpRecord.error/result）**都从对应记录取——会话级 last_error/last_apply 可能已被后续操作覆盖（`current_op == op_id`=仍在途）：re-apply 等复用状态场景，纯看状态会把**旧 ACTIVE** 误判为新操作成功；续等跨越后续操作也能命中历史，被逐出（超 N 条）→ 抛 `StaleWait`（指引查会话审计，T2-06 §2）；
-  - **resolve**：READY=成功；RESOLVE_FAILED=抛（携 `last_error`）。
-  - **apply / recover**：**唯 ACTIVE=成功**——回到 READY 即 rolled_back 失败（T2-06 rolled_back→READY），抛 `ApplyRolledBackError`（携 `last_apply.failure`）；DEVICE_DIRTY 抛 `DeviceDirtyError`。判据用 `last_apply.device_state` / `last_error` 消歧——**绝不以「状态可继续」当成功**。
+  - **resolve**：终局判据=本 op 的 `OpRecord.outcome`（失败细节=OpRecord.error）；会话态 READY/RESOLVE_FAILED 仅辅助展示。
+  - **apply / recover**：终局判据=本 op 的 `OpRecord.result.device_state`——committed=成功；rolled_back=抛 `ApplyRolledBackError`（携 OpRecord.result.failure）；dirty=抛 `DeviceDirtyError`；outcome=aborted_by_restart=抛 `OperationAborted`（服务端重启中止，T2-06 §3）。**绝不以「状态可继续/ACTIVE」当成功，绝不读会话级 last_apply/last_error 判本 op**（可能已被后续操作覆盖——op_id 关联的意义所在）。
   - **导入 job（另一族，无 op_id）**：`job.wait()` 轮询 GET `/imports/{job_id}`，以 job 自身 `status` 终态判定——done=成功返 model 句柄、failed=抛 `ImportFailedError`（携源错误摘要）。job 一次性、状态不复用，**无需也无从 op_id 关联**（202 响应本就只有 `{job_id, poll_url}`，T2-07 §2）。
   - **等待超时 ≠ 任务失败**：抛 `WaitTimeout`（任务仍在服务端跑，句柄可继续 wait）——两族通用。
 - **产物即文件**：`artifact()` 流式写盘 + 校验 Content-Length；不把大产物读进内存。

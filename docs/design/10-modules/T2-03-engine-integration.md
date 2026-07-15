@@ -43,7 +43,9 @@ GenerateRequest = {
 }                                                    #   超时可能发生在受理之后，此时 client 无 job_id 可依
 GenerateResult = {
   pathloss_db, is_los, lsps: {...},                  # 引擎 OUTPUT_FORMAT_SPEC 字段
-  clusters: [{delay_s, power_linear, aod_az/zen_deg, aoa_az/zen_deg, xpr_db, k_factor?}, ...] | None,
+  clusters: [{delay_s, power_linear, phase_rad, aod_az/zen_deg, aoa_az/zen_deg, xpr_db, k_factor?}, ...] | None,
+                                                     # phase_rad=引擎按 seed 生成的簇初相（确定性契约的一部分，
+                                                     #   簇→伪径退化时作复增益辐角，M5 §3）
                                                      # 统计场景/CDL-x 返回 clusters
   taps: [{delay_norm, power_db, doppler_spectrum}, ...] | None,
                                                      # ★TDL-x 场景返回 taps（无角度，直落 level=TDL）——
@@ -61,17 +63,18 @@ GenerateResult = {
 
 ```python
 class ChannelEngineClient:
-    async def generate(self, req: GenerateRequest) -> tuple[ChannelModel, EngineReport]:
+    async def generate(self, req: GenerateRequest, portmap: PortMap) -> tuple[ChannelModel, EngineReport]:
+        # ★portmap 与 M4 同源同格式：持久化入 provenance（M5 前置校验要求）并用于 want_cir 信道键入
         self._check_version_compat()                       # /v1/version：api_version 兼容范围校验，不符拒
-        job = await self._post("/v1/jobs", req, timeout=SUBMIT_TIMEOUT)
-        res = await self._poll_until_done(job, timeout=JOB_TIMEOUT)   # 指数退避轮询
-        model = to_canonical(res, req)                      # ↓转换规则
+        job_id = (await self._post("/v1/jobs", req, timeout=SUBMIT_TIMEOUT))["job_id"]   # ★解包，勿用整响应
+        res = await self._poll_until_done(job_id, timeout=JOB_TIMEOUT)   # 指数退避轮询
+        model = to_canonical(res, req, portmap)             # ↓转换规则（portmap 入 provenance）
         if req.want_cir:
-            cir = await self._get_npz(f"/v1/jobs/{job}/cir")
+            cir = await self._get_npz(f"/v1/jobs/{job_id}/cir")
             attach_cir(model, cir)                          # gain_series 内联 / cir_ref 外置（10MB 规则，《T1-03c》§7）
         return model, report
 
-def to_canonical(res, req) -> ChannelModel:
+def to_canonical(res, req, portmap) -> ChannelModel:
     # 统计场景(UMa/UMi/...) → level="GCM"(clusters)；CDL-x → level="CDL"(clusters)；
     # TDL-x → level="TDL"：res.taps(delay_norm×req.delay_spread_s→delay_s, power_db→线性, 谱型→rayleigh_spec)
     #         直落 channels[].taps
@@ -81,7 +84,8 @@ def to_canonical(res, req) -> ChannelModel:
     #   不产 environment（schema 中 environment/channels 按 level 互斥，CIR 载荷只挂 channels）；
     #   统计描述(lsps/clusters)入 provenance 供溯源
     # meta.arrays=req.arrays（自包含）；provenance={source_type:"ChannelEgine_38901",
-    #   source_ref:f"{engine_version}", import_config:{**req, seed}}   # seed 入 provenance（可复现）
+    #   source_ref:f"{engine_version}", import_config:{**req, "portmap": serialize(portmap)}}
+    #   ——seed 与 portmap 均入 provenance（可复现 + M5 前置校验，与 M4 对称）
 ```
 
 - **两源统一兑现**：产出与 M4 同一 schema——GCM/CDL 模型交 **M5** 沿退化链降到 TDL（**M5 契约随本篇修订为接受 level∈{RT,GCM,CDL}**，簇路径见《T2-05》§2/§3 修订——原 RT-only 契约无法消费引擎产物）；TDL-x 直落 `channels[].taps`；CIR 交 AscCirBackend。

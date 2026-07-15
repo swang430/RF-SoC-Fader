@@ -60,11 +60,17 @@ def reduce_to_tdl(rt, portmap, cfg):
     lam = C / rt.meta.center_frequency_hz                        # λ = c/fc
     pairs = {}                                                    # (in,out) → 阵元对射线集（复增益已含导向相位）
 
+    def rays_of(link):                                            # ★层级适配：RT=真径；GCM/CDL=簇→伪径
+        if model.level == "RT": return link.rays
+        return [PseudoRay(delay_s=c.delay_s, gain=sqrt(c.power_linear)*exp(1j*c.phase_rad),
+                          angles=cluster_center_angles(c)) for c in link.clusters]
+        # 簇初相 phase_rad 来自引擎（seed 确定，T2-03 §2）；簇内角扩展本期不展开（§2 注）
+
     if portmap.link_mode == "per_element_pair":
         # RT 已逐阵元对算径（几何真值，含近场效应）——无需导向合成
         for link in rt.environment.links:
             io = portmap.map(link.tx_index, link.rx_index)        # ElementKey→(input,output)
-            pairs[io] = [(r.delay_s, r.gain, angles(r)) for r in link.rays]
+            pairs[io] = [(r.delay_s, r.gain, angles(r)) for r in rays_of(link)]
     else:  # single_reference：Phase 2 导向合成（★必须先于量化合并——正确性要点 1）
         ref = rt.environment.links[0]
         for m in tx_elements(rt.meta.arrays):
@@ -75,7 +81,7 @@ def reduce_to_tdl(rt, portmap, cfg):
                      r.gain * steer(rt.meta.arrays.tx, m, r.aod_az_deg, r.aod_zen_deg, lam)
                             * conj(steer(rt.meta.arrays.rx, n, r.aoa_az_deg, r.aoa_zen_deg, lam)),
                      angles(r))
-                    for r in ref.rays]
+                    for r in rays_of(ref)]
 
     # Phase 3：逐信道对 量化→合并→选径（调 M4 函数集；输入已带导向相位）
     binned = {}

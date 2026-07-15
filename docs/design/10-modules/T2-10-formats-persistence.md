@@ -71,7 +71,7 @@ class BlobStore:
     def pin(ref, owner) / unpin(ref, owner)              # 引用计数：scenario/session/model 持有者登记
 ```
 
-- **10MB 规则的唯一落点**（《T1-03c》§7）：判定量=**内联形态的实际体量**——即 `gain_series` 按 T1-03c JSON 形态（`(re,im)` 对）序列化后计入 model-json 的字节增量；**不按 npz-cir 字节判**（NPZ 是外置格式且更紧凑，用它判定会低估内联文档体量、漏触发外置——阈值语义所指本就是内联文档大小）。≤阈值：CIR **保持冻结 schema 的原字段形态内联**（逐 `Tap.gain_series: Complex[n_snapshots]`，无 M10 中间表示）；>阈值：整体按 `npz-cir/v1` 落 blob、模型侧置 `cir_ref`（gain_series 不承载）。阈值为 M10 常量、判定 helper 唯一（`attach_cir` 调用处），全平台不散落第二处。
+- **10MB 规则的唯一落点**（《T1-03c》§7）：判定量=**内联形态的实际体量**——即 `gain_series` 按 T1-03c JSON 形态（`(re,im)` 对）序列化后计入 model-json 的字节增量；**不按 npz-cir 字节判**（NPZ 是外置格式且更紧凑，用它判定会低估内联文档体量、漏触发外置——阈值语义所指本就是内联文档大小）。≤阈值：CIR **保持冻结 schema 的原字段形态内联**（逐 `Tap.gain_series: Complex[n_snapshots]`，无 M10 中间表示）；>阈值：整卷按 `npz-cir/v1` 落 blob（一份含全部 pair）；**引用挂逐 Channel**——`channels[(in,out)].cir_ref = (blob_ref, pair_index)` 定位自身切片（冻结 schema 把 `cir_ref` 定义在 Channel 上、T2-03 attach_cir 也按 pair 键入——**不是模型级单一引用**），`gain_series` 不承载。阈值为 M10 常量、判定 helper 唯一（`attach_cir` 调用处），全平台不散落第二处。
 - **GC**：引用计数归零的 blob 进延迟回收队列（宽限期防误删——审计留痕）；`pin/unpin` 随持有者生命周期由 repository 层自动维护，业务不手工管理。
 - .asc 产物与 FramePlan 存档同走 blob（M7 `/artifact` 端点经 `open_stream` 流式直出）。
 

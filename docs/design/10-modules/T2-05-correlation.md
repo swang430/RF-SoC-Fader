@@ -22,9 +22,15 @@ M5 实现 **`CorrelationSynthesizer` 策略**与 **RT→TDL 退化编排**：把
 
 ```python
 class CorrelationSynthesizer(Protocol):
-    def reduce_to_tdl(self, rt: ChannelModel, portmap: PortMap,
+    def reduce_to_tdl(self, model: ChannelModel, portmap: PortMap,
                       cfg: SynthesisConfig) -> tuple[ChannelModel, FidelityReport]: ...
-    # 输入 level=RT（M4 产出）；输出 level=TDL（taps+correlation），provenance.reduced_from=rt.id
+    # 输入 level ∈ {RT, GCM, CDL}（M4 的 RT / M3 引擎的 GCM/CDL——两源统一消费，T2-03 修订）；
+    # 输出 level=TDL（taps+correlation），provenance.reduced_from=model.id
+    #
+    # ★簇路径（level=GCM/CDL）：environment.links[].clusters[] 的簇中心角/功率/时延
+    #   视作"径集"执行与 §3 相同的导向/塌缩/量化/共享归一编排（引擎产出的簇已是带 seed 的
+    #   抽样实现，GCM 与 CDL 在退化上同构）；簇内角扩展本期不展开子径（记 FidelityReport，
+    #   子径展开为后续增强）；XPR/K 按簇透传入 Tap
 
 @dataclass(frozen=True)
 class SynthesisConfig:
@@ -33,6 +39,9 @@ class SynthesisConfig:
     max_paths: int                      # ≤ 目标 capabilities.max_paths
     velocity_mps: Vec3 | None           # 几何多普勒（可选，《T1-05》§5）
     rayleigh: RayleighSpecConfig | None # 衰落边缘统计（可选；功率归一化 hook→M8）
+    cluster_phase_seed: int = 0         # ★簇相位兜底种子：GCM/CDL 输入既无 Cluster.phase_rad 也无
+                                        #   provenance 载体时（如用户直录 3GPP CDL 定表，表无相位列）
+                                        #   按此确定性合成（§3 cluster_phase 优先级③）
 
 @dataclass(frozen=True)
 class FidelityReport:                   # §5 数值核验产物
@@ -43,33 +52,51 @@ class FidelityReport:                   # §5 数值核验产物
     quant: QuantReport                  # 量化丢弃统计（透传 M4）
 ```
 
-- 错误前置：`rt.level != "RT"` 拒；`single_reference` 而 `meta.arrays` 缺失拒；`mode=A` 走 §6 守卫。
+- 错误前置：`model.level ∉ {RT,GCM,CDL}` 拒（TDL 无需退化、CIR 走 A 档）；`single_reference` 而 `meta.arrays` 缺失拒；`mode=A` 走 §6 守卫。
 
 ---
 
 ## 3. B 方案编排（核心伪代码，落实《T1-06》§6bis）
 
 ```python
-def reduce_to_tdl(rt, portmap, cfg):
-    lam = C / rt.meta.center_frequency_hz                        # λ = c/fc
+def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 §2 契约的 model（level∈{RT,GCM,CDL}）
+    lam = C / model.meta.center_frequency_hz                     # λ = c/fc
     pairs = {}                                                    # (in,out) → 阵元对射线集（复增益已含导向相位）
+
+    def rays_of(link):                                            # ★层级适配：RT=真径；GCM/CDL=簇→伪径
+        if model.level == "RT": return link.rays
+        return [PseudoRay(delay_s=c.delay_s,
+                          gain=sqrt(c.power_linear)*exp(1j*cluster_phase(model, link, k)),
+                          # cluster_phase 取相位优先级（单一实现）：
+                          # ①Cluster.phase_rad（schema 升版后）
+                          # ②provenance.import_config["cluster_phases"][link][k]
+                          #   （T2-03 §3 转换时写入的过渡载体，簇序=引擎输出序）
+                          # ③两者皆缺（如用户直录 CDL 定表，表无相位）→
+                          #   PRNG(cfg.cluster_phase_seed) 按 (link,k) 确定性合成 U(0,2π)，
+                          #   种子记入输出 provenance 与 FidelityReport——可复现、不拒
+                          #   （任一层输入原则，T1-03b）
+                          angles=cluster_center_angles(c)) for k, c in enumerate(link.clusters)]
+                          # ★k 由 enumerate 绑定：簇序号即 phase_rad 的索引键（引擎按簇序输出）
+        # 簇初相 phase_rad 来自引擎（seed 确定，T2-03 §2）；★该字段属 T1-03c 升版打包项（T2-04 §8-5 ③），
+        # 升版落地前以 provenance.import_config["cluster_phases"] 为过渡载体（T2-03 §3 转换时写入）；
+        # 簇内角扩展本期不展开（§2 注）
 
     if portmap.link_mode == "per_element_pair":
         # RT 已逐阵元对算径（几何真值，含近场效应）——无需导向合成
-        for link in rt.environment.links:
+        for link in model.environment.links:
             io = portmap.map(link.tx_index, link.rx_index)        # ElementKey→(input,output)
-            pairs[io] = [(r.delay_s, r.gain, angles(r)) for r in link.rays]
+            pairs[io] = [(r.delay_s, r.gain, angles(r)) for r in rays_of(link)]
     else:  # single_reference：Phase 2 导向合成（★必须先于量化合并——正确性要点 1）
-        ref = rt.environment.links[0]
-        for m in tx_elements(rt.meta.arrays):
-            for n in rx_elements(rt.meta.arrays):
+        ref = model.environment.links[0]
+        for m in tx_elements(model.meta.arrays):
+            for n in rx_elements(model.meta.arrays):
                 io = portmap.map(m, n)
                 pairs[io] = [
                     (r.delay_s,
-                     r.gain * steer(rt.meta.arrays.tx, m, r.aod_az_deg, r.aod_zen_deg, lam)
-                            * conj(steer(rt.meta.arrays.rx, n, r.aoa_az_deg, r.aoa_zen_deg, lam)),
+                     r.gain * steer(model.meta.arrays.tx, m, r.aod_az_deg, r.aod_zen_deg, lam)
+                            * conj(steer(model.meta.arrays.rx, n, r.aoa_az_deg, r.aoa_zen_deg, lam)),
                      angles(r))
-                    for r in ref.rays]
+                    for r in rays_of(ref)]
 
     # Phase 3：逐信道对 量化→合并→选径（调 M4 函数集；输入已带导向相位）
     binned = {}
@@ -83,13 +110,13 @@ def reduce_to_tdl(rt, portmap, cfg):
     taps = {io: normalize(bins, ref=sqrt(ref_power)) for io, bins in binned.items()}
 
     # Phase 5：目标相关矩阵（供核验/GUI；R 不进设备帧——《T1-03b》）
-    R_tx, R_rx = correlation_from_angles(rt, rt.meta.arrays, lam)  # §4
+    R_tx, R_rx = correlation_from_angles(model, model.meta.arrays, lam)  # §4
     R = kron(R_tx, R_rx)
 
     # 可选：几何多普勒 f_d=(v·k̂_arr)/λ 逐径；瑞利谱 spec（功率归一化交 M8 hook）
     apply_doppler_and_rayleigh(taps, cfg, lam)
 
-    tdl = assemble_tdl_model(rt, taps, correlation=(R_tx,R_rx,R), reduced_from=rt.id)
+    tdl = assemble_tdl_model(model, taps, correlation=(R_tx,R_rx,R), reduced_from=model.id)
     return tdl, verify_fidelity(tdl, R, quant)                    # §5
 ```
 
@@ -103,8 +130,9 @@ def reduce_to_tdl(rt, portmap, cfg):
 ## 4. 目标相关矩阵计算（《T1-06》§2 落地）
 
 ```python
-def correlation_from_angles(rt, arrays, lam):
+def correlation_from_angles(model, arrays, lam):
     # 径集：per_element_pair 用参考功率谱（所有链路射线并集）；single_reference 用参考链路
+    #   ——径集一律经 §3 rays_of 适配取得（GCM/CDL 即簇伪径，角度=簇中心角）
     R_tx = Σ_k P_k · a_tx(φ_dep,k, θ_dep,k) · a_tx(...)ᴴ         # M_tx×M_tx
     R_rx = Σ_k P_k · a_rx(φ_arr,k, θ_arr,k) · a_rx(...)ᴴ
     R_tx /= trace(R_tx)/M_tx ; R_rx /= trace(R_rx)/M_rx           # 对角归一
@@ -146,7 +174,7 @@ class ATimeVaryingSynthesizer:      # stub：接口冻结，不实现
 
 | 触发 | 处置 |
 | :-- | :-- |
-| `rt.level != RT` / provenance 缺 portmap | 拒（明确指出应先走 M4 导入） |
+| `model.level ∉ {RT,GCM,CDL}` / provenance 缺 portmap | 拒（指明合法入口：M4 导入或 M3 引擎生成） |
 | 某信道对合并后 0 有效径 | 该信道对产出空 taps（M2 渲染为不使能该信道）+ FidelityReport 计数，不整体失败 |
 | `mode=A` + 设备无 CIR 能力 | CapabilityError（§6） |
 | 数值异常（NaN 传播/奇异 R） | 拒并报出问题径/信道对定位 |

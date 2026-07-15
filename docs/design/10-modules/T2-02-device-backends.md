@@ -158,19 +158,19 @@ async def apply(self, plan: FramePlan) -> ApplyResult:
         state = await self._rollback()
         return ApplyResult(committed=False, device_state=state,
                            failure=at("telemetry_wait", "timeout"), ...)
-    # ★0x03 = 「单次后关闭」（《T1-A1》）——取到核验帧后必须恢复周期节奏，
-    #   否则 §5 依赖的遥测活性信号熄灭。恢复帧自身也是控制帧（会产生回显），
-    #   必须同样等待并核验其 echo，否则残留队列会污染下一事务的匹配：
-    restore = build_control_frame([SubFrame(ParamID.INFO_RETURN,   # ★子帧须经 M1 封装为完整控制帧再发送
+    # ★先判溢出，再谈恢复周期档——溢出即回滚，给将被 RESET 的配置恢复节奏毫无意义且多耗一轮交互：
+    if tele.adc_overrange or tele.combiner_overflow or tele.awgn_overflow:
+        state = await self._rollback()                          # 同样可能 "dirty"，不得丢弃返回值
+        return ApplyResult(committed=False, device_state=state,
+                           failure=overflow(tele), telemetry=tele, ...)
+    # —— 成功路径：恢复周期节奏。0x03 = 「单次后关闭」（《T1-A1》），不恢复则 §5 活性信号熄灭。
+    #    恢复帧自身也是控制帧（会产生回显），必须同样等待并核验其 echo，防残留污染下一事务：
+    restore = build_control_frame([SubFrame(ParamID.INFO_RETURN,   # 子帧经 M1 封装为完整控制帧
                                             u8(self._telemetry_cadence))])   # 恢复 0x01/0x02（配置的周期档）
     await self._tx(restore)
     r_echo = await self._await_echo(timeout=ECHO_TIMEOUT)
     if r_echo is ERROR_FRAME or r_echo is TIMEOUT or not verify_copy_echo(restore, r_echo):
         log.warning("cadence-restore echo 异常")                # 不回滚配置（已核验通过），但记告警并标记活性待观察
-    if tele.adc_overrange or tele.combiner_overflow or tele.awgn_overflow:
-        state = await self._rollback()                          # 同样可能 "dirty"，不得丢弃返回值
-        return ApplyResult(committed=False, device_state=state,
-                           failure=overflow(tele), telemetry=tele, ...)
     return ApplyResult(committed=True, device_state="committed", telemetry=tele, ...)
 ```
 

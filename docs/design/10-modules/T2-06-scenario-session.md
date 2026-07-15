@@ -51,7 +51,15 @@ class Session:
     state: SessionState                       # §3 状态机
     artifacts: ResolvedArtifacts | None       # resolve 产物缓存
     last_apply: ApplyResult | None            # M2 结果原样保留（含 device_state / telemetry）
-    audit: tuple[AuditRecord, ...]            # 触达设备操作全记录：谁·何时·帧摘要·结果（T1-11 §3）
+    last_error: StructuredError | None        # ★最近一次失败的结构化错误（ScenarioError/CapabilityError/
+                                              #   EngineError/ImportError 原样）：异步任务失败时由运行器写入——
+                                              #   RESOLVE_FAILED 时 reports/last_apply 皆空，这是轮询方唯一的
+                                              #   定位来源（M7 直译 problem+json）；下次操作成功时清空
+    tweaks: tuple[TweakRecord, ...]           # ACTIVE 期微调记录（§4bis）：设备现态=artifact+tweaks 按序重放
+    audit: tuple[AuditRecord, ...]            # ★会话生命周期操作全记录（resolve/apply/tweak/close/recover）：
+                                              #   谁·何时·终局结果；触达设备类另含帧摘要（T1-11 §3 为最低要求，
+                                              #   此处放宽为全生命周期——异步任务由 M6 运行器在终局写入，
+                                              #   含 RESOLVE_FAILED 等非设备触达终局，保证无轮询也闭合）
 
 @dataclass(frozen=True)
 class ResolvedArtifacts:
@@ -82,16 +90,16 @@ class ResolvedArtifacts:
 
 | 状态 | 含义 | 允许操作 |
 | :-- | :-- | :-- |
-| CREATED | 已绑定 scenario@version × device × backend，未物化 | resolve / close |
+| CREATED | 已绑定 scenario@version × device × backend，未物化 | resolve / apply（auto_resolve：内部先 resolve）/ close |
 | RESOLVING | 编排管线运行中（§4；长耗时异步 job，《T1-04》） | 查询进度 / cancel |
 | READY | 产物就绪（FramePlan/AscFileSet + 报告），设备零触达 | dry_run / apply / close |
 | APPLYING | M2 事务进行中 | 查询进度（同会话禁止并发第二个 apply） |
-| ACTIVE | committed——设备射频输出已按该产物生效 | readback / re-apply / close |
+| ACTIVE | committed——设备射频输出已按该产物生效 | readback / tweak（§4bis）/ re-apply / close |
 | DEVICE_DIRTY | M2 返回 dirty：设备状态未知（T2-02 §契约） | recover / close(reset) |
 | RESOLVE_FAILED · CLOSED | 终态（CLOSED 释放设备租约） | —— |
 
 - **设备互斥＝租约（lease），不是锁**：首次 `apply` 时向 `DeviceLeaseRegistry` **非阻塞 try-acquire**——已被他会话持有 → 立即 `DeviceBusy`（含持有者 session_id），**不排队**（asyncio.Lock 会排队等待，语义不符，不采用）；本会话已持有（re-apply）→ 幂等继续。**租约生命周期与 apply 调用解耦**：一经取得，无论结果（ACTIVE / rolled_back 回 READY / DEVICE_DIRTY）都由本会话持续持有——设备的后续状态由本会话负责收拾——直至 close（或 asc 后端无设备语义）才释放。不同设备并行不受限（《T1-10》单机多会话）。`readback` 只读，不受租约限制（M8 遥测同理）。
-- **close 策略**：`close(release="disable" | "leave" | "reset")`，默认 **disable**——经 M2 微帧通道下发「全局使能关」（复用 T2-02 build_control_frame + echo 纪律，同遥测节奏恢复机制），配置保留、可快速重启；`reset`=RESET 清态；`leave`=仅释放租约（交接给外部测量流程时用）。**★自 DEVICE_DIRTY 进入 close 强制 `reset`**：`disable`/`leave` 一律拒（`InvalidCloseError`）——设备状态未知时，「仅关使能」预设了残留配置可信、「原样交接」把未知状态转嫁给下一租约持有者，均不成立；必须 RESET 重建已知基线后才释放租约（与 M2 dirty 语义「重连后须先 RESET 才可信」一致）。asc 后端 close 无设备语义（直接 CLOSED）。
+- **close 策略**：`close(release="disable" | "leave" | "reset")`，默认 **disable**——经 M2 微帧通道（`apply_micro`，T2-02 契约）下发「全局使能关」（echo 纪律同 apply，同遥测节奏恢复机制），配置保留、可快速重启；`reset`=RESET 清态；`leave`=仅释放租约（交接给外部测量流程时用）。**★自 DEVICE_DIRTY 进入 close 强制 `reset`**：`disable`/`leave` 一律拒（`InvalidCloseError`）——设备状态未知时，「仅关使能」预设了残留配置可信、「原样交接」把未知状态转嫁给下一租约持有者，均不成立；必须 RESET 重建已知基线后才释放租约（与 M2 dirty 语义「重连后须先 RESET 才可信」一致）。asc 后端 close 无设备语义（直接 CLOSED）。
 - **重启恢复**：会话经 M10 持久化；进程重启后 ACTIVE/APPLYING 一律降为 **DEVICE_DIRTY**（重启期间设备真实状态未知，须 recover 重建信任——与 M2 dirty 语义一致，不得谎称仍然可信）。
 
 ---
@@ -100,11 +108,15 @@ class ResolvedArtifacts:
 
 ```python
 async def resolve(sess) -> ResolvedArtifacts:
+    transition(sess, to=RESOLVING)       # ★状态迁移在 resolve 本体内——单独 resolve 与 apply(auto_resolve)
+                                         #   复合路径的可观测状态严格一致（CREATED→RESOLVING→READY；
+                                         #   失败由运行器落 RESOLVE_FAILED + last_error）
     scen = scenario_repo.get(sess.scenario_id, sess.scenario_version)    # 不可变读（M10）
     backend = registry.backend_of(sess)                                  # rfsoc(device) | asc
     caps = backend.capabilities
     if (hit := artifact_cache.get(scen.scenario_id, scen.version, sess.backend, digest(caps))):
-        return hit                                                       # ★幂等缓存：命中即跳 ①②④
+        set_artifacts(sess, hit)                                         # ★幂等缓存：命中即跳 ①②④
+        transition(sess, to=READY); return hit
 
     # ① materialize：三源归一到 canonical model（各附报告）
     match scen.source:
@@ -130,11 +142,24 @@ async def resolve(sess) -> ResolvedArtifacts:
     artifact = backend.render(model, addr_of(sess))                                    # M2
     model_repo.put(model)                                # 内容寻址入库（provenance 链锚点，M10）
     arts = ResolvedArtifacts(model.id, artifact, hash_of(artifact), collect_reports(rep, fidelity))
-    artifact_cache.put(..., arts); return arts
+    artifact_cache.put(..., arts)
+    set_artifacts(sess, arts)            # ★先落 Session 再发布 READY——轮询方见 READY 即产物可取
+    transition(sess, to=READY); return arts        #   （READY 早于 artifacts 落库=下载/dry-run 竞态）
 
-async def apply(sess, dry_run=False) -> ApplyResult | Manifest:
-    if dry_run:                          # dry-run：返回 READY 缓存的 manifest——零设备触达（T1-04）
+async def apply(sess, dry_run=False, auto_resolve=True) -> ApplyResult | Manifest:
+    if dry_run:                          # dry-run：返回缓存 manifest——零设备触达（T1-04）、同步快返
+        require_state(sess, {READY, ACTIVE})             # ★仅产物已缓存态；CREATED 不隐式 resolve——
+                                                         #   物化是长耗时（引擎可达分钟级），不得混入同步
+                                                         #   路径：InvalidStateError(allowed_ops=[resolve])
         return manifest_of(sess.artifacts.artifact)      # RFSoC：帧摘要/字节数；asc：文件预览
+    if sess.state == CREATED and auto_resolve:            # ★复合语义归 M6：CREATED 直接 apply 时先物化再下发
+        await resolve(sess)                               #   （M7 零业务逻辑；artifacts 落库与状态迁移都在
+        sess = session_repo.get(sess.session_id)          #   resolve 本体——与单独 resolve 一致可观测）
+        # ★Session 不可变（frozen）：resolve 经 repo 产生新快照，必须重载——旧绑定仍是
+        #   CREATED 快照，artifacts=None，直接往下走会取空产物
+    require_state(sess, {READY, ACTIVE})                 # ★非 dry-run 前置：CREATED 且 auto_resolve=False
+                                                         #   在此显式拒（InvalidStateError, allowed_ops=[resolve]）
+                                                         #   ——不得带着 artifacts=None 落到租约/下发
     if sess.device_id is not None:                       # asc 无设备语义，跳过租约
         leases.try_acquire(sess.device_id, owner=sess.session_id)
         # ★非阻塞租约（§3）：他会话持有→立即 raise DeviceBusy(holder)；本会话已持有→幂等继续。
@@ -144,10 +169,52 @@ async def apply(sess, dry_run=False) -> ApplyResult | Manifest:
     result = await backend.apply(sess.artifacts.artifact)                # M2 事务（echo/遥测在其内）
     audit_end(sess, result)
     transition(sess, by=result.device_state)             # committed→ACTIVE / rolled_back→READY
-    return result                                        #   / dirty→DEVICE_DIRTY
+                                                         #   / dirty→DEVICE_DIRTY
+    if result.device_state in {"committed", "rolled_back"}:
+        clear_tweaks(sess)   # ★基线不变式（§4bis）：committed=设备回 artifact 基线、rolled_back=设备被
+                             #   RESET 清空——旧 tweaks 均已不在设备上；dirty 暂留供诊断（recover 终局再清）
+    return result
+
+# ★异步提交面（供 M7 的 202 语义）：长耗时操作由 M6 任务运行器承载——网关不持协程、不追踪任务
+def submit_resolve(sess) -> OperationRef: ...
+def submit_apply(sess, auto_resolve=True) -> OperationRef: ...
+def submit_recover(sess) -> OperationRef: ...
+    # 本体即上述 resolve()/apply()/recover(RESET+重 apply)；dry-run 不走提交面（无设备触达，
+    #   同步 apply(dry_run=True) 直返 manifest）。OperationRef={op_id}。
+    # 进度不设独立端点：Session.state 即进度（RESOLVING/APPLYING → 终点态），GET session 观察
+    #   （M7 poll_url 指向它）。同会话已有在途操作 → 立即拒 OperationInFlight（状态机禁并发的显式化）
 ```
 
 - **幂等**（《T1-11》§1）：同 scenario@version（seed 固定）→ 同 model_id → 同 artifact_hash → 重复 apply 下发**逐字节相同**的帧序列。
+
+### 4bis. ACTIVE 期微调（tweak——支撑《T1-04》`/channels PATCH` 与 GUI 微调、《T1-11》§3「apply/微调/复位」审计口径）
+
+```python
+async def tweak(sess, channel: tuple[int,int], path: int | None,
+                params: TweakParams) -> ApplyResult:
+    # 前置：sess.state == ACTIVE（已持有租约）；rfsoc 后端限定（asc 无「运行中设备」语义）
+    # TweakParams 仅限【真·逐径/逐信道】物理量：主时延/幅度/相位/多普勒（逐径）——
+    #   ★AWGN/输出衰减为输出口级旋钮（ID8/9/11 作用于整个输出端、影响该口所有信道），
+    #   不入 per-channel tweak（跨信道副作用）：修改走 scenario 新 version 的 re-apply；
+    #   使能类与 RESET 同样禁入：配置面不变式（configure-then-enable，T2-02 G0/G6）只归 apply 管
+    frames = encode_tweak_frames(channel, path, params)     # M1 编码（物理量→码值→子帧→控制帧）
+    result = await backend.apply_micro(frames)              # M2 微帧通道（echo 纪律；device_state 语义同 apply）
+    record = TweakRecord(now, who, channel, path, params, result)
+    audit_append(sess, record)                              # 审计无条件记录（含失败，T1-11 §3）
+    match result.device_state:                              # 状态更新经 repo（Session 不可变，同 transition 机制）
+        case "committed":   session_repo.append_tweak(sess, record)
+            # ★仅 committed 进 tweaks 重放列表——未生效的微调不得成为「设备现态」的一部分
+        case "rolled_back": transition(sess, to=READY, clear_tweaks=True)
+            # M2 回滚=RESET 基线：base 配置已不在设备上，会话退回 READY 待重新 apply（tweaks 清空，审计仍在）
+        case "dirty":       transition(sess, to=DEVICE_DIRTY)
+            # 设备状态未知：tweaks 暂留仅供诊断展示；recover()=RESET+重 apply 回 artifact 基线，
+            # ★完成时必须清空 tweaks（否则「现态=artifact+tweaks」不变式失真）——审计记录不清
+    return result
+```
+
+- **复现语义**：设备现态 = artifact（base apply）+ `tweaks` 按序重放（**仅含 committed 微调**）——tweak 不改 scenario、不改 artifact_hash，偏离被**显式记录**而非篡改基线（配置即数据不破坏；重放=`apply → 逐条 tweak`）。
+- **视图**：逐信道参数视图 = artifact 参数 + tweaks 叠加（M7 `/channels` GET 以此表达）。
+- **基线重置即清 tweaks**：re-apply 与 recover()（RESET+重 apply）都把设备重置到 artifact 基线——完成后 `tweaks` 一律清空（其效果已被覆盖；审计记录保留）。
 - **报告透传**：Import/Engine/Fidelity/Quant 报告随 ResolvedArtifacts 全量保留——GUI ④面板与验收都以此为据，M6 不摘要不吞。
 
 ---
@@ -209,6 +276,7 @@ M7/GUI          M6(Session)              M3/M4/M5                M2(Backend)    
 | **设备互斥** | 双会话同设备并发 apply；异设备并行 | 后者 DeviceBusy 含持有者 id；异设备两条都成功 |
 | **close 三策略** | disable / leave / reset；另加 DEVICE_DIRTY 下 close(disable) 与 close(leave) | disable 仅发使能关微帧（echo 校验）；leave 零触达；reset 发 RESET；DIRTY 下非 reset 被拒（InvalidCloseError） |
 | **重启恢复** | 持久化会话重载 | ACTIVE→DEVICE_DIRTY 降级；审计连续不丢 |
+| **tweak 失败分流** | stub apply_micro 返 committed / rolled_back / dirty 三剧本 | 仅 committed 入 tweaks；rolled_back 清空 tweaks 回 READY；dirty 冻结进 DEVICE_DIRTY；三者审计皆有记录 |
 | **dry-run 隔离** | dry_run 全流程跑桩设备 | 传输层零调用（mock 断言） |
 
 ---

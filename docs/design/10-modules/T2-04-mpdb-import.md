@@ -110,7 +110,10 @@ def import_mpdb(source, arrays: {tx: AntennaArray, rx: AntennaArray},
     model = ChannelModel(
         schema_version=..., id=new_id(), level="RT", realization="none",
         meta=Meta(center_frequency_hz=cfg.fc, units=CANONICAL_UNITS,
-                  angle_convention=ZENITH, arrays=arrays),          # 自包含（《T1-03c》§4）
+                  angle_convention=ZENITH,
+                  arrays=with_portmap_projection(arrays, portmap)), # 自包含（《T1-03c》§4）；
+        # ★把校验过的 PortMap 回填进 arrays.port_map（int[]，单极化投影）——传导/单极化场景下
+        #   schema 字段即完整可用；OTA 多极化超出 int[] 表达力的部分以 provenance 为规范来源（见下）
         time=TimeAxis(mode="static"),                               # 本期单快照
         grid=Grid(topology=cfg.topology, channel_pairs=portmap.used_pairs()),
         environment=Environment(links=[

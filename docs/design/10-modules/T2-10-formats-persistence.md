@@ -1,0 +1,128 @@
+# T2-10 · M10 格式与持久化（功能设计）
+
+> 第二册《功能设计》· 第 10 篇（横切基础设施：codec 注册表 · I/O 适配层 · repository · blob 存储）
+> 状态：草稿 v0.1 · 待评审
+> 依据：《T1-03c §7 序列化/10MB 规则》《T1-11 §5 配置即数据》《T1-09 技术栈》（冻结基线）；文件 I/O 系统归属 M10 为第一册既定决策
+> 消费方：全体模块——M4/M3（模型入库）、M5（模型/报告）、M6（scenario/session/审计/artifact 缓存）、M7（配置/密钥/审计）、M8（告警规则/校准表）、M2-Asc（.asc 落盘）；依赖：schema（T1-03c，只消费不定义）
+
+---
+
+## 1. 概述与定位
+
+M10 是全平台的「数据落地面」，四件事：
+
+1. **codec 注册表**：canonical model / 报告 / 产物的序列化格式统一注册（编码/解码/嗅探/版本迁移）。
+2. **I/O 适配层**：本地文件系统首版，接口抽象可换对象存储（商用部署项）。
+3. **repository**：scenario / session / 审计 / 运行配置的持久化仓（含并发裁决与重启恢复的数据面）。
+4. **blob 存储**：大对象（时变 CIR、.asc 产物、帧序列）内容寻址存放——10MB 内联/外置规则的落点。
+
+**非职责**：schema 定义本体（T1-03c 为规范，M10 只实现其序列化）、业务编排（M6）、协议帧编码（M1）、HTTP 表达（M7）。
+
+---
+
+## 2. codec 注册表
+
+```python
+registry = {
+  "model-json/v1":    # canonical model ↔ JSON（T1-03c 全字段；复数按 (re,im) 直角坐标——内部表示约定）
+  "npz-cir/v1":       # 时变 CIR 张量 ↔ NPZ（键/轴序/dtype 与 T2-03 §2 布局表逐字一致——同一契约两处引用）
+  "asc/v1":           # {(in,out): asc_text} ↔ .asc 文件集（In{i}_Out{j} 命名；行格式锚定 ChannelEgine 样例与《T1-A1》）
+  "frameplan-bin/v1": # FramePlan ↔ 二进制（帧序列原样 + manifest JSON 边车——黄金帧对比的存档格式）
+  "report-json/v1":   # Import/Engine/Fidelity/Quant 报告 ↔ JSON（GUI/验收复用）
+}
+def encode(kind, obj) -> bytes ; def decode(kind, data) -> obj ; def sniff(data) -> kind
+```
+
+- **版本化读写**：一切序列化产物携带 `schema_version`；解码端**向前兼容读**（旧版数据 → 迁移钩子链升到当前版），编码端只写当前版。T1-03c v1.1 升版（PortMap/origin/phase_rad 打包项）落地时，`model-json/v1 → v1.1` 迁移钩子在此实现——旧库存模型无需重导。
+- **完整性**：所有落盘产物带 sha256 边车（读取时校验，损坏显式报错不静默截断）。
+
+---
+
+## 3. repository（SQLite 首版，接口抽象可换）
+
+| 仓 | 内容 | 关键语义 |
+| :-- | :-- | :-- |
+| `ScenarioRepo` | Scenario 全版本 | **版本不可变**（追加式）；并发创建新版本由**乐观锁**裁决（冲突→VersionConflict，M7 映 409，T2-06 §6） |
+| `SessionRepo` | Session 快照 | 每次 transition/set_artifacts/append_tweak 写新快照；**重启恢复数据面**（T2-06 §3：状态降级、孤儿 current_op 清理、completed_ops 有界历史的持久载体） |
+| `AuditRepo` | 审计双源 | **append-only**（无 UPDATE/DELETE 路径——接口层面不提供）；网关受理记录（T2-07 §4）+ 会话生命周期终局（T2-06 §2）两源同仓不同 kind |
+| `ModelRepo` | canonical model | **内容寻址**（model_id = 载荷 sha256）：同模型天然去重——幂等链（T2-06 §4）的存储面 |
+| `ConfigRepo` | 告警规则/校准表/密钥表/运行参数 | 版本化配置（M8 阈值、bypass 表、M7 密钥与 scope、缓冲窗 N 等）；变更留痕 |
+
+- **选型**：单机首版 **SQLite**（零运维、事务足够——写并发瓶颈在设备租约处天然串行）；接口层（Protocol）隔离，Postgres/对象存储为商用替换项（开放问题 §7-1），**业务模块只见接口**。
+- blob 与元数据分离：repository 存引用（`blob_ref`），载荷入 §4 blob store——库文件不膨胀。
+
+---
+
+## 4. blob 存储与 10MB 规则
+
+```python
+class BlobStore:
+    def put(data: bytes) -> BlobRef        # 内容寻址：ref = sha256（同内容自然去重）
+    def get(ref) -> bytes ; def open_stream(ref) -> IO   # 大对象流式读（M7 /artifact 直通不进内存）
+    def pin(ref, owner) / unpin(ref, owner)              # 引用计数：scenario/session/model 持有者登记
+```
+
+- **10MB 规则的唯一落点**（《T1-03c》§7）：`attach_cir` 等调用方只调 `inline_or_ref(data)`——≤10MB 返回内联字节、>10MB 落 blob 返 `cir_ref`。阈值为 M10 常量，全平台不散落第二处。
+- **GC**：引用计数归零的 blob 进延迟回收队列（宽限期防误删——审计留痕）；`pin/unpin` 随持有者生命周期由 repository 层自动维护，业务不手工管理。
+- .asc 产物与 FramePlan 存档同走 blob（M7 `/artifact` 端点经 `open_stream` 流式直出）。
+
+---
+
+## 5. I/O 适配层
+
+- 首版本地文件系统：blob 目录（两级 sha 前缀分桶）+ SQLite 文件 + 配置文件；路径策略集中于此（AscCirBackend「写文件（路径策略经 M10 I/O 适配层）」的落点，T2-02 §4）。
+- 接口抽象 `Storage`（read/write/stream/list/delete）——对象存储（S3 兼容）为替换实现（商用部署项），业务零改动。
+- 原子写：临时文件 + rename（同目录）——崩溃不产生半写文件（与 §2 sha256 校验双保险）。
+
+---
+
+## 6. 错误处理
+
+| 场景 | 处置 |
+| :-- | :-- |
+| 解码版本高于当前支持 | `SchemaTooNew`（指明升级平台，不猜读） |
+| sha256 校验失败 | `CorruptData`（显式，含 ref 与期望/实际摘要；不静默返回部分数据） |
+| 乐观锁冲突 | `VersionConflict`（携 current_version，M7→409） |
+| blob 缺失（悬空 ref） | `BlobMissing`（含 ref 与登记持有者——GC 误删可溯因） |
+| 磁盘满/IO 错 | 显式上抛（M6 事务在 apply 前失败=RESOLVE_FAILED，不产生半状态） |
+| audit 写失败 | **操作照常返回但强告警**（审计尽力而为 vs 阻塞业务——本期选不阻塞，商用复评为强一致，开放问题 §7-3） |
+
+---
+
+## 7. 开放问题
+
+1. Postgres / S3 兼容对象存储的替换时点（多实例部署前提）。
+2. 静态数据加密与备份策略（商用部署项）。
+3. 审计写失败语义：尽力而为（本期）vs 两阶段强一致（商用合规复评）。
+4. blob GC 宽限期与容量水位策略（实现期定，M10 配置承载）。
+
+---
+
+## 8. 测试设计（本模块）
+
+| 类别 | 内容 | 判据 |
+| :-- | :-- | :-- |
+| **序列化往返黄金** | 五类 codec 各取代表样本（含满字段 canonical model） | 往返逐字节/逐字段无损；NPZ 布局与 T2-03 表逐键一致 |
+| **版本迁移** | 构造 v1 旧样本 → 升级钩子 → 当前版 | 字段映射正确；SchemaTooNew 路径显式 |
+| **完整性** | 篡改落盘字节 | CorruptData（不返回部分数据） |
+| **乐观锁** | 并发创建同 scenario 新版本 | 恰一成功，余 VersionConflict 携 current_version |
+| **append-only** | 尝试改写/删除审计行 | 接口不存在该路径（类型层面断言）+ 库约束拒绝 |
+| **内容寻址去重** | 同模型两次入库 | 同 model_id、单份存储 |
+| **blob 生命周期** | pin/unpin/归零/宽限回收/悬空 ref | 引用计数正确；BlobMissing 可溯因 |
+| **原子写** | 写入中途 kill（注入） | 无半写文件；重启后数据面自洽（配合 T2-06 重启恢复用例） |
+| **流式直出** | >10MB 产物经 open_stream | 内存峰值有界（不整载） |
+
+---
+
+## 9. 与现有代码的差量
+
+现 `channel_simulator` 仅 CLI 写 csv/bin/hex 输出文件（无持久化概念）：M10 全新。旧 CLI 的三类输出由 `frameplan-bin/v1`（bin/hex）与 manifest（csv 语义）承接（M9 §5 收敛路线的格式面）。
+
+---
+
+## 10. 本篇验收
+
+- 五类 codec 往返黄金 + NPZ/asc 与既有契约（T2-03 §2/T1-A1）逐键核对全绿。
+- 乐观锁/append-only/内容寻址/blob 生命周期测试全绿。
+- 原子写注入测试与 T2-06 重启恢复用例联合通过（数据面自洽）。
+- T1-03c v1.1 迁移钩子演练：v1 样本无损升级（升版 PR 的存储侧预案）。

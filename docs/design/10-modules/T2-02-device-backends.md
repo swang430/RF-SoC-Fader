@@ -174,6 +174,7 @@ async def apply(self, plan: FramePlan) -> ApplyResult:
     return ApplyResult(committed=True, device_state="committed", telemetry=tele, ...)
 ```
 
+- **`_rollback()`（可达路径）在 RESET 后 best-effort 重发 INFO_RETURN 周期档**：0x03 已关闭周期遥测、RESET 亦将该参数复位——不恢复则回滚后 §5 活性信号熄灭。恢复帧的 echo 以短超时 best-effort 处理（RESET 后 COPY_RETURN 回默认态，可能不再产生回显），失败仅告警不改变 device_state。
 - **逐帧确认**：发下一帧前必须收到上一帧回显并比对通过（简单、可定位失败帧；吞吐留待实测,见 §9-3）。
 - **幂等**：同一 FramePlan 重放结果一致（G0 的 RESET 保证从已知基线开始）。
 - **回滚语义注意**：协议 RESET **保留瑞利系数与输出衰减**（《T1-A1》§4）→ 回滚后这两类残留；事务上以「回滚 = 回到安全基线（全局/多径禁用）」定义，不承诺字节级还原（记入 ApplyResult 提示）。

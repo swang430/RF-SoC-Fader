@@ -51,6 +51,18 @@ class Session:
     state: SessionState                       # §3 状态机
     artifacts: ResolvedArtifacts | None       # resolve 产物缓存
     last_apply: ApplyResult | None            # M2 结果原样保留（含 device_state / telemetry）
+    current_op: OperationRef | None           # ★在途异步操作：submit 面受理即置位、终局清空——
+                                              #   OperationInFlight 拒并发的判据；轮询方见此知「仍在跑」
+    completed_ops: tuple[OpRecord, ...]       # ★终局操作历史（有界，最近 N 条；OpRecord={op_id, kind,
+                                              #   outcome, at, error?, result?}——★终局细节随记录：error=
+                                              #   该操作的结构化错误、result=其 ApplyResult 摘要。会话级
+                                              #   last_error/last_apply 会被后续操作覆盖，晚归续等只能从
+                                              #   OpRecord 取本操作的失败因/结果）：任务终局时运行器追加——
+                                              #   客户端 wait 以「op_id ∈ completed_ops」关联终局取细节
+                                              #   （只存最近一条时，超时续等期间有后续操作完成会让旧 op
+                                              #   永远匹配不上；re-apply 场景纯看状态会把旧 ACTIVE 误判成功）。
+                                              #   N 有界防膨胀（M10 配置）；被逐出的 op 视为过期→客户端
+                                              #   StaleWait（指引查会话审计）
     last_error: StructuredError | None        # ★最近一次失败的结构化错误（ScenarioError/CapabilityError/
                                               #   EngineError/ImportError 原样）：异步任务失败时由运行器写入——
                                               #   RESOLVE_FAILED 时 reports/last_apply 皆空，这是轮询方唯一的
@@ -100,7 +112,7 @@ class ResolvedArtifacts:
 
 - **设备互斥＝租约（lease），不是锁**：首次 `apply` 时向 `DeviceLeaseRegistry` **非阻塞 try-acquire**——已被他会话持有 → 立即 `DeviceBusy`（含持有者 session_id），**不排队**（asyncio.Lock 会排队等待，语义不符，不采用）；本会话已持有（re-apply）→ 幂等继续。**租约生命周期与 apply 调用解耦**：一经取得，无论结果（ACTIVE / rolled_back 回 READY / DEVICE_DIRTY）都由本会话持续持有——设备的后续状态由本会话负责收拾——直至 close（或 asc 后端无设备语义）才释放。不同设备并行不受限（《T1-10》单机多会话）。`readback` 只读，不受租约限制（M8 遥测同理）。
 - **close 策略**：`close(release="disable" | "leave" | "reset")`，默认 **disable**——经 M2 微帧通道（`apply_micro`，T2-02 契约）下发「全局使能关」（echo 纪律同 apply，同遥测节奏恢复机制），配置保留、可快速重启；`reset`=RESET 清态；`leave`=仅释放租约（交接给外部测量流程时用）。**★自 DEVICE_DIRTY 进入 close 强制 `reset`**：`disable`/`leave` 一律拒（`InvalidCloseError`）——设备状态未知时，「仅关使能」预设了残留配置可信、「原样交接」把未知状态转嫁给下一租约持有者，均不成立；必须 RESET 重建已知基线后才释放租约（与 M2 dirty 语义「重连后须先 RESET 才可信」一致）。asc 后端 close 无设备语义（直接 CLOSED）。
-- **重启恢复**：会话经 M10 持久化；进程重启后 ACTIVE/APPLYING 一律降为 **DEVICE_DIRTY**（重启期间设备真实状态未知，须 recover 重建信任——与 M2 dirty 语义一致，不得谎称仍然可信）。
+- **重启恢复**：会话经 M10 持久化；进程重启后 ACTIVE/APPLYING 一律降为 **DEVICE_DIRTY**（重启期间设备真实状态未知，须 recover 重建信任——与 M2 dirty 语义一致，不得谎称仍然可信）；**RESOLVING 回退 CREATED**（resolve 零设备触达、无 dirty 语义——重启后重新 resolve 可幂等命中 artifact 缓存，不遗留无活任务的僵死中间态）。**★孤儿 current_op 清理**：重启时 `current_op` 非空（202 已受理、运行器未及终局即崩溃）→ 向 completed_ops 追加 `OpRecord{op_id, outcome="aborted_by_restart", error=重启中止}` 并清空 current_op——等待者命中该记录得到明确终局（而非永久挂起），会话也不再被幽灵在途操作卡死（OperationInFlight 永拒）。
 
 ---
 
@@ -182,7 +194,9 @@ def submit_recover(sess) -> OperationRef: ...
     # 本体即上述 resolve()/apply()/recover(RESET+重 apply)；dry-run 不走提交面（无设备触达，
     #   同步 apply(dry_run=True) 直返 manifest）。OperationRef={op_id}。
     # 进度不设独立端点：Session.state 即进度（RESOLVING/APPLYING → 终点态），GET session 观察
-    #   （M7 poll_url 指向它）。同会话已有在途操作 → 立即拒 OperationInFlight（状态机禁并发的显式化）
+    #   （M7 poll_url 指向它）。受理即置 current_op；任务终局时运行器向 completed_ops 追加 OpRecord
+    #   并清 current_op——客户端以 op_id 关联「本操作」终局（§2 字段注）。
+    #   同会话已有在途操作（current_op 非空）→ 立即拒 OperationInFlight（状态机禁并发的显式化）
 ```
 
 - **幂等**（《T1-11》§1）：同 scenario@version（seed 固定）→ 同 model_id → 同 artifact_hash → 重复 apply 下发**逐字节相同**的帧序列。

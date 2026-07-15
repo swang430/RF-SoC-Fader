@@ -23,8 +23,8 @@
 | T2-05 | [相关性合成](T2-05-correlation.md) | M5：CorrelationSynthesizer（B 落地/A 预留）、退化算子 | M4, M8（谱归一纯函数） | ✅ 已合并（PR #10，用户评审） |
 | T2-06 | [场景/会话管理](T2-06-scenario-session.md) | M6：生命周期状态机、配置即数据 | M2 | ✅ 已合并（PR #12，Codex 3 条闭环） |
 | T2-07 | [API 网关](T2-07-api-gateway.md) | M7：REST/OpenAPI、SCPI 映射 | M6 | ✅ 已合并（PR #13，Codex 24 条闭环） |
-| T2-08 | [遥测与校准](T2-08-telemetry-calibration.md) | M8：遥测解析消费、谱型归一化、bypass 表、溢出保护 | M1, M2 | **本 PR** |
-| T2-09 | SDK/客户端 | M9：Python SDK | M7 | 待开 |
+| T2-08 | [遥测与校准](T2-08-telemetry-calibration.md) | M8：遥测解析消费、谱型归一化、bypass 表、溢出保护 | M1, M2 | ✅ 已合并（PR #14，Codex 6 条闭环） |
+| T2-09 | [SDK/客户端](T2-09-sdk.md) | M9：Python SDK | M7 | **本 PR** |
 | T2-10 | 格式与持久化 | M10：codec 注册表、I/O 适配层、配置 repository、blob | schema | 待开 |
 | T2-11 | GUI | M11：五视图细化（依《T1-14》，Web） | M7, M9 | 待开 |
 

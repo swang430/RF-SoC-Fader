@@ -95,7 +95,9 @@ def import_mpdb(source, arrays: {tx: AntennaArray, rx: AntennaArray},
                 portmap: PortMap, cfg: ImportConfig,
                 target_caps: BackendCapabilities) -> tuple[ChannelModel, ImportReport]:
     raw = mpdb_reader.load(source)                       # §2
-    validate_link_table(raw.links, portmap.link_mode, arrays)   # §3.1 分模式核验（端点集合/单链路）
+    validate_link_table(raw.links, portmap.link_mode, arrays,   # §3.1 分模式核验（端点集合/单链路）
+                        identity_by=cfg.identity_by,            # 身份解析策略与容差随调用显式传入
+                        epsilon_m=cfg.position_epsilon_m)
     validate_portmap(portmap, ValidationContext(                # §3.2 V1–V6：上下文完整传入——
         grid_topology=cfg.topology, path_expansion_enabled=cfg.path_expansion,
         capabilities=target_caps, test_mode=cfg.test_mode, arrays=arrays))

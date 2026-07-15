@@ -69,7 +69,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 - **认证**：API-Key（第三方，Header）＋短时会话令牌（GUI）。本地部署默认静态密钥表（M10 配置承载）；OIDC/IdP 为可插拔后续项（商用部署）。
 - **鉴权三档 scope**（递进包含）：
   `read`（遥测/场景/模型/会话状态 GET）⊂ `write`（imports/scenarios 写）⊂ `control`（sessions 的 apply/tweak/close/recover 及一切**触达设备**操作）。
-- **审计中间件**：control 域每次调用（**含失败与被拒**）→ `AuditRecord{key_id, when, op, session_id, manifest_digest, outcome}` → M10 append-only。**同步操作记终局 outcome；异步提交记「受理」（含 op_id）**——终局结果由 M6 任务运行器在任务完成时写入会话审计（T2-06 §2：审计域=会话生命周期全记录，**含 resolve 这类非设备触达任务的终局**），网关**不依赖后续轮询闭合审计**；GET 类请求纯读、零审计写。与 M6 会话内审计**互补不重复**：网关记「谁经哪个门做了什么请求」，M6 记「会话/设备上实际发生了什么」。
+- **审计中间件**：control 域每次调用（**含失败与被拒**）→ `AuditRecord{key_id, when, op, session_id?, manifest_digest?, outcome}` → M10 append-only。两个可空字段的语义：`session_id?`——会话尚不存在或创建被拒的调用（如未授权 `POST /sessions`）为空；`manifest_digest?`——仅**产物就绪的设备触达操作**（apply / tweak / close 微帧）填写，resolve 提交与创建类为空（此时无产物可摘要）。**同步操作记终局 outcome；异步提交记「受理」（含 op_id）**——终局结果由 M6 任务运行器在任务完成时写入会话审计（T2-06 §2：审计域=会话生命周期全记录，**含 resolve 这类非设备触达任务的终局**），网关**不依赖后续轮询闭合审计**；GET 类请求纯读、零审计写。与 M6 会话内审计**互补不重复**：网关记「谁经哪个门做了什么请求」，M6 记「会话/设备上实际发生了什么」。
 - **限流**：per-key 令牌桶（read/write/control 分桶）；apply 类在 M6 设备租约处天然串行——网关**不做隐式排队**（同 M6 语义），队列深度超限直接 429。
 
 ---
@@ -86,7 +86,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `*CLS` / `:SYSTem:ERRor?` | 错误队列清除 / FIFO 弹出 | 网关侧队列（problem 摘要按 SCPI 习惯入队） |
 | `:SYSTem:AUTH "api-key"` | 连接认证（绑定 key 的 scope；未认证态唯三合法指令之一） | 认证栈（与 REST 同密钥表） |
 | `*OPC?` | 操作完成同步 | 会话终态轮询封装 |
-| `:SCENario:LOAD "name"` | 按名加载最新 version | scenario_repo |
+| `:SCENario:LOAD "scenario_id[@version]"` | 按**稳定标识**加载（缺省 @version=最新）——`name` 非唯一身份（T2-06 §2 仅 id+version 稳定），不作 LOAD 键；按名检索走 REST/SDK | scenario_repo |
 | `:SESSion:BACKend RFSOC\|ASC` | 绑定后端（隐式会话） | M6 create |
 | `:SESSion:APPLy` / `:SESSion:STATe?` | 下发 / 状态查询 | M6 `submit_apply(auto_resolve=True)`（与 REST 同一调用；`*OPC?` 轮询终态）/ get |
 | `:SESSion:CLOSe [DISable\|RESet\|LEAVe]` | 关闭（缺省 DISable；DIRTY 强制 RESet 由 M6 裁决） | M6 close |

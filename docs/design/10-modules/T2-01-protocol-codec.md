@@ -85,7 +85,7 @@ CH_MAIN_DELAY_UNIT_NS = 50.0 / 3.0          # 信道主时延（0..6090）
 INPUT_DELAY_UNIT_US   = 1.0 / 120.0         # 输入时延（0..72e6；>10µs 生效）
 
 def sweep_start_hz_to_code(hz) -> int        # clip ±2**27
-def sweep_speed_to_code(hz_per_us) -> int    # clip ±(2**17-1)
+def sweep_speed_to_code(hz_per_us) -> int    # clip [-2**17, 2**17-1]（下界 −2¹⁷ 为合法码值）
 def sigsrc_hz_to_code(hz) -> int             # clip [-2**31, 2**31-1]（i32 上界为 2³¹−1，非 +2³¹）
 def pulse_ns_to_code(ns) -> int              # u32
 def channel_main_delay_ns_to_code(ns) -> int # 0..6090
@@ -173,7 +173,7 @@ class DownlinkParser:
 ### 4.3 回显比对
 
 ```python
-def verify_copy_echo(sent_control_frame: bytes, echo: CopyEchoFrame) -> bool:
+def verify_copy_echo(sent: bytes, echo: CopyEchoFrame) -> bool:   # sent = 已下发的控制帧原始字节
     # 期望：echo.raw == sent 且帧头第4字节 0x40→0x69，其余逐字节相同
     return echo.raw[:3]==sent[:3] and echo.raw[3]==0x69 and echo.raw[4:]==sent[4:]
 ```

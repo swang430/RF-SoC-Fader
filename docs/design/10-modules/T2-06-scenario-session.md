@@ -139,6 +139,9 @@ async def resolve(sess) -> ResolvedArtifacts:
                                                  # with_fresh_client_key：spec+新 UUID → 完整 GenerateRequest
         case ModelRefSource(mid):
             model, rep = model_repo.get(mid), None                                     # M10
+    model = model_repo.put(model)        # ★materialize 后立即入库：回填内容寻址 id（T2-10 §3，put 幂等）
+                                         #   ——后续 reduced_from 必须引用此 hash id（模块内 new_id 仅占位，
+                                         #   否则溯源链指向库中不存在的瞬态 id）
 
     # ② reduce：按层级降到硬件可实现面（T1-03b 退化链；TDL/CIR 直通）
     fidelity = None
@@ -152,7 +155,8 @@ async def resolve(sess) -> ResolvedArtifacts:
 
     # ④ render：纯函数产物（dry-run 与 apply 同源）
     artifact = backend.render(model, addr_of(sess))                                    # M2
-    model_repo.put(model)                                # 内容寻址入库（provenance 链锚点，M10）
+    model = model_repo.put(model)                        # 退化产物入库并回填 hash id（ResolvedArtifacts
+                                                         #   用它——与 ① 处 put 同一引用纪律，T2-10 §3）
     arts = ResolvedArtifacts(model.id, artifact, hash_of(artifact), collect_reports(rep, fidelity))
     artifact_cache.put(..., arts)
     set_artifacts(sess, arts)            # ★先落 Session 再发布 READY——轮询方见 READY 即产物可取

@@ -26,8 +26,19 @@ GET  /healthz               → 200/503
 POST /v1/jobs               → 提交生成任务（body=GenerateRequest）→ {job_id}   # 异步
 GET  /v1/jobs/{id}          → {status: queued|running|done|failed, error?}
 GET  /v1/jobs/{id}/result   → GenerateResult（JSON：簇/径/LSP，见 §3）
-GET  /v1/jobs/{id}/cir      → application/octet-stream（NPZ：时变 CIR 张量；仅 want_cir 任务）
+GET  /v1/jobs/{id}/cir      → application/octet-stream（NPZ：时变 CIR 张量；仅 want_cir 任务，布局↓）
 ```
+
+**NPZ CIR 布局（二进制契约的一部分，v1 固定）**：
+
+| 键 | dtype · 形状 | 语义 |
+| :-- | :-- | :-- |
+| `gains` | complex128 `[n_pairs, n_snapshots, n_taps]` | 复增益；轴序固定=（端口对, 快照, 抽头） |
+| `delays_s` | float64 `[n_pairs, n_taps]` | 抽头时延（升序）；**快照间不变**——时变时延本期不支持 |
+| `pairs` | int32 `[n_pairs, 2]` | 每行 `(tx_element, rx_element)`（引擎侧阵元序号，tx 主序）；行序即 `gains` 轴 0 序，client 经 portmap 映射为设备 `(in,out)` |
+| `update_rate_hz` | float64 标量 | 第 s 个快照时刻 = `s/update_rate_hz`（t₀=0） |
+
+- client 侧一致性校验：`gains.shape[1:] == (cir_meta.n_snapshots, cir_meta.n_taps)`、`delays_s` 升序、`pairs` 不超出 req.arrays 阵元域——不符拒收（EngineError 显式上抛，不静默截断）。
 
 ```python
 GenerateRequest = {
@@ -80,6 +91,10 @@ def to_canonical(res, req, portmap) -> ChannelModel:
     # TDL-x → level="TDL"：res.taps(delay_norm×req.delay_spread_s→delay_s, power_db→线性, 谱型→rayleigh_spec)
     #         直落 channels[].taps
     # clusters → Environment.links[].clusters[]（字段一一对应：delay_s/power_linear/角度[天顶]/xpr_db/k_factor）
+    #   ★簇初相 phase_rad：冻结版 Cluster 无此字段（升版打包项③，T2-04 §8-5）——升版落地前由本函数
+    #   把逐链路相位数组写入 provenance.import_config["cluster_phases"]（{link: [phase_rad×N簇]}，
+    #   簇序=引擎输出序），作 T2-05 cluster_phase 的过渡载体（仅存请求会把结果相位丢失）；
+    #   升版后直写 Cluster.phase_rad、载体字段废弃
     # ★want_cir → level="TDL" + realization="CIR"：引擎 CIR 本就是逐端口对实现——
     #   按 **portmap 入参**（generate 的完整校验版，勿用 req.arrays.port_map 的 int[] 投影）
     #   键入 channels[(in,out)].taps.gain_series/cir_ref（10MB 规则），

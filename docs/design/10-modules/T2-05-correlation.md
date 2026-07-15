@@ -65,11 +65,13 @@ def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 
         return [PseudoRay(delay_s=c.delay_s,
                           gain=sqrt(c.power_linear)*exp(1j*cluster_phase(model, link, k)),
                           # cluster_phase：schema 升版后读 Cluster.phase_rad；升版前读
-                          # provenance.import_config 的引擎结果（过渡载体，两处单一实现）
+                          # provenance.import_config["cluster_phases"][link][k]
+                          # （T2-03 §3 转换时写入的过渡载体，簇序=引擎输出序；两处单一实现）
                           angles=cluster_center_angles(c)) for k, c in enumerate(link.clusters)]
                           # ★k 由 enumerate 绑定：簇序号即 phase_rad 的索引键（引擎按簇序输出）
         # 簇初相 phase_rad 来自引擎（seed 确定，T2-03 §2）；★该字段属 T1-03c 升版打包项（T2-04 §8-5 ③），
-        # 升版落地前以 provenance.import_config 内的引擎结果为过渡载体；簇内角扩展本期不展开（§2 注）
+        # 升版落地前以 provenance.import_config["cluster_phases"] 为过渡载体（T2-03 §3 转换时写入）；
+        # 簇内角扩展本期不展开（§2 注）
 
     if portmap.link_mode == "per_element_pair":
         # RT 已逐阵元对算径（几何真值，含近场效应）——无需导向合成

@@ -178,13 +178,16 @@ async def apply(sess, dry_run=False, auto_resolve=True) -> ApplyResult | Manifes
                                                          #   ——不得带着 artifacts=None 落到租约/下发
     audit_begin(sess, who, manifest_digest)              # ★审计先行（T2-10 §6）且【先于租约】：受理落盘
                                                          #   失败→拒绝执行——预检失败不得留下已占租约的副作用
-    if sess.device_id is not None:                       # asc 无设备语义，跳过租约
-        leases.try_acquire(sess.device_id, owner=sess.session_id)
-        # ★非阻塞租约（§3）：他会话持有→立即 raise DeviceBusy(holder)（audit_end(outcome=rejected)
-        #   闭合审计后抛）；本会话已持有→幂等继续。注意作用域：租约在此取得后【不随本函数返回
-        #   而释放】——跨越 ACTIVE 全程直至 close()/终态清理才 leases.release()（rolled_back/dirty
-        #   亦保持持有，§3）
-    result = await backend.apply(sess.artifacts.artifact)                # M2 事务（echo/遥测在其内）
+    try:
+        if sess.device_id is not None:                   # asc 无设备语义，跳过租约
+            leases.try_acquire(sess.device_id, owner=sess.session_id)
+            # ★非阻塞租约（§3）：他会话持有→立即 raise DeviceBusy(holder)；本会话已持有→幂等继续。
+            #   租约取得后【不随本函数返回而释放】——跨越 ACTIVE 全程直至 close()/终态清理才
+            #   leases.release()（rolled_back/dirty 亦保持持有，§3）
+        result = await backend.apply(sess.artifacts.artifact)            # M2 事务（echo/遥测在其内）
+    except BaseException as e:
+        audit_end(sess, outcome_of(e)); raise            # ★「每 begin 恰一 end」不变式：DeviceBusy/
+                                                         #   传输异常等一切 begin 后异常路径都闭合审计
     audit_end(sess, result)
     transition(sess, by=result.device_state)             # committed→ACTIVE / rolled_back→READY
                                                          #   / dirty→DEVICE_DIRTY

@@ -81,7 +81,7 @@ class BlobStore:
 
 - 首版本地文件系统：blob 目录（两级 sha 前缀分桶）+ SQLite 文件 + 配置文件；路径策略集中于此（AscCirBackend「写文件（路径策略经 M10 I/O 适配层）」的落点，T2-02 §4）。
 - 接口抽象 `Storage`（read/write/stream/list/delete）——对象存储（S3 兼容）为替换实现（商用部署项），业务零改动。
-- 原子写：临时文件 + rename（同目录）——崩溃不产生半写文件（与 §2 sha256 校验双保险）。
+- 原子写分两级：**单文件**=临时文件 + rename（同目录）；**多文件产物**（AscFileSet 等）=**目录级原子提交**——全部文件写入 `<target>.tmp/` → fsync → 单次目录 rename 落位（同文件系统内原子）：逐文件 rename 中途崩溃会留下「部分文件已提交」的产物目录（M2 asc 的 committed 语义是**整集**写盘成功，T2-02 §4），目录级提交下半写只可能是 `.tmp` 残留（启动清扫），final 目录要么全有要么没有。均与 §2 sha256 校验双保险。
 
 ---
 

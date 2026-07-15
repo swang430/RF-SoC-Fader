@@ -159,13 +159,20 @@ async def tweak(sess, channel: tuple[int,int], path: int | None,
     # TweakParams 仅限逐径/逐信道物理量（主时延/幅度/相位/多普勒/AWGN/输出衰减）——
     #   使能类与 RESET 禁入：配置面不变式（configure-then-enable，T2-02 G0/G6）只归 apply 管
     frames = encode_tweak_frames(channel, path, params)     # M1 编码（物理量→码值→子帧→控制帧）
-    result = await backend.apply_micro(frames)              # M2 微帧通道（echo 纪律；失败分流同 §4：
-    record = TweakRecord(now, who, channel, path, params, result)   #   dirty→DEVICE_DIRTY）
-    session_repo.append_tweak(sess, record)                 # 状态更新经 repo（Session 不可变，同 transition 机制）
+    result = await backend.apply_micro(frames)              # M2 微帧通道（echo 纪律；device_state 语义同 apply）
+    record = TweakRecord(now, who, channel, path, params, result)
+    audit_append(sess, record)                              # 审计无条件记录（含失败，T1-11 §3）
+    match result.device_state:                              # 状态更新经 repo（Session 不可变，同 transition 机制）
+        case "committed":   session_repo.append_tweak(sess, record)
+            # ★仅 committed 进 tweaks 重放列表——未生效的微调不得成为「设备现态」的一部分
+        case "rolled_back": transition(sess, to=READY, clear_tweaks=True)
+            # M2 回滚=RESET 基线：base 配置已不在设备上，会话退回 READY 待重新 apply（tweaks 清空，审计仍在）
+        case "dirty":       transition(sess, to=DEVICE_DIRTY)
+            # 设备状态未知：tweaks 冻结存档；recover()=RESET+重 apply 后回到无 tweak 基线
     return result
 ```
 
-- **复现语义**：设备现态 = artifact（base apply）+ `tweaks` 按序重放——tweak 不改 scenario、不改 artifact_hash，偏离被**显式记录**而非篡改基线（配置即数据不破坏；重放=`apply → 逐条 tweak`）。
+- **复现语义**：设备现态 = artifact（base apply）+ `tweaks` 按序重放（**仅含 committed 微调**）——tweak 不改 scenario、不改 artifact_hash，偏离被**显式记录**而非篡改基线（配置即数据不破坏；重放=`apply → 逐条 tweak`）。
 - **视图**：逐信道参数视图 = artifact 参数 + tweaks 叠加（M7 `/channels` GET 以此表达）。
 - re-apply 会重置设备到 artifact 基线：**re-apply 后 `tweaks` 清空**（其效果已被覆盖，留在审计里）。
 - **报告透传**：Import/Engine/Fidelity/Quant 报告随 ResolvedArtifacts 全量保留——GUI ④面板与验收都以此为据，M6 不摘要不吞。
@@ -229,6 +236,7 @@ M7/GUI          M6(Session)              M3/M4/M5                M2(Backend)    
 | **设备互斥** | 双会话同设备并发 apply；异设备并行 | 后者 DeviceBusy 含持有者 id；异设备两条都成功 |
 | **close 三策略** | disable / leave / reset；另加 DEVICE_DIRTY 下 close(disable) 与 close(leave) | disable 仅发使能关微帧（echo 校验）；leave 零触达；reset 发 RESET；DIRTY 下非 reset 被拒（InvalidCloseError） |
 | **重启恢复** | 持久化会话重载 | ACTIVE→DEVICE_DIRTY 降级；审计连续不丢 |
+| **tweak 失败分流** | stub apply_micro 返 committed / rolled_back / dirty 三剧本 | 仅 committed 入 tweaks；rolled_back 清空 tweaks 回 READY；dirty 冻结进 DEVICE_DIRTY；三者审计皆有记录 |
 | **dry-run 隔离** | dry_run 全流程跑桩设备 | 传输层零调用（mock 断言） |
 
 ---

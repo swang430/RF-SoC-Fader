@@ -46,10 +46,13 @@ def load(path: str) -> RawRtTable:
 ### 3.1 数据结构与两种链路模式
 
 ```python
+ElementKey = int | tuple[int, PolBranch]       # 传导：阵元号；OTA 双极化：(阵元号, 极化支路 "+45"/"-45"...)
+                                               # ——键型必须能承载 (element,pol)，否则 V4 的双极化独立端口无法表示
+
 @dataclass(frozen=True)
 class PortMap:
-    tx_element_to_input:  Mapping[int, int]    # 发射阵元 → 输入端口(0..7)
-    rx_element_to_output: Mapping[int, int]    # 接收阵元 → 输出端口(0..7)
+    tx_element_to_input:  Mapping[ElementKey, int]    # 发射阵元(或阵元×极化) → 输入端口(0..7)
+    rx_element_to_output: Mapping[ElementKey, int]    # 接收阵元(或阵元×极化) → 输出端口(0..7)
     link_mode: Literal["per_element_pair", "single_reference"]
 ```
 
@@ -60,7 +63,7 @@ class PortMap:
 | **per_element_pair** | LINK 集合覆盖 M_tx×M_rx **每个阵元对**（RT 已逐对算径，几何真值） | 每 LINK 按 PortMap 直接映射到 (input,output) 信道对；**不需要**导向合成 |
 | **single_reference** | 单 LINK（单参考天线对）+ 用户提供阵列几何 | M5 用导向矢量**合成**各阵元对信道（《T1-06》B 方案 Phase 2），再映射 |
 
-- 模式由导入配置显式声明 + 对 LINK 表**核验**（`len(links)` vs `M_tx×M_rx`；不符→明确报错，不猜）。
+- 模式由导入配置显式声明 + 对 LINK 表做**分模式核验**（不猜）：`per_element_pair` 要求 `len(links)==M_tx×M_rx`；`single_reference` 要求 `len(links)==1`；均不符→明确报错并提示两种合法形态。
 - 两种模式产出同一 RT 层 schema（single_reference 时 `environment` 只有参考 LINK，合成结果由 M5 产出为 TDL 层）。
 
 ### 3.2 校验规则（构造 PortMap 时全部执行）
@@ -82,10 +85,10 @@ V6 能力上限: 端口数/信道数 ≤ backend.capabilities.grid（M2）
 
 ```python
 def import_mpdb(source, arrays: {tx: AntennaArray, rx: AntennaArray},
-                portmap: PortMap, cfg: ImportConfig) -> ChannelModel:
+                portmap: PortMap, cfg: ImportConfig) -> tuple[ChannelModel, ImportReport]:
     raw = mpdb_reader.load(source)                       # §2
     validate_portmap_against(raw.links, portmap, cfg)    # §3（含 link_mode 核验）
-    rays = clean(raw.rays)                               # 去 NaN/Inf/零增益，逐类计数上报（不静默）
+    rays, report = clean(raw.rays)                       # 去 NaN/Inf/零增益；report=逐类丢弃计数（★随返回值带出，不丢）
     model = ChannelModel(
         schema_version=..., id=new_id(), level="RT", realization="none",
         meta=Meta(center_frequency_hz=cfg.fc, units=CANONICAL_UNITS,
@@ -104,7 +107,7 @@ def import_mpdb(source, arrays: {tx: AntennaArray, rx: AntennaArray},
                               import_config=asdict(cfg)),           # 可复现（《T1-05》§6）
     )
     if total_rays(model) == 0: raise ValueError("no valid ray after cleaning")
-    return model                                          # level=RT；退化到 TDL 由 M5 编排
+    return model, report                                  # level=RT；退化到 TDL 由 M5 编排；report 供 GUI/审计（§6）
 ```
 
 `ImportConfig`（dataclass，沿现有风格）：`fc, topology, link_mode, max_paths≤24, power_mode(coherent|noncoherent), default_doppler_hz, velocity?(几何多普勒,《T1-05》§5), test_mode(conducted|ota)`。

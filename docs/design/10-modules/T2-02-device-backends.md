@@ -71,7 +71,9 @@ class ApplyResult:
 ### 3.1 子帧分组（组=不可拆的原子单位）
 
 ```
-G0 前导组   : RESET(13) [+COPY_RETURN(15)=1 +INFO_RETURN(14)]     # 必须整组位于第一帧之首
+G0 前导组   : RESET(13) [+COPY_RETURN(15)=1]                       # 必须整组位于第一帧之首
+             # ★INFO_RETURN(14) 不入 G0：单次遥测请求(0x03)由 apply 在 VERIFYING 阶段独立下发——
+             #  若随首帧发出，多帧场景下设备在第一帧后即回遥测（反映部分配置），污染核验（§4）
 G1 全局组   : GLOBAL_ENABLE(1) OUTPUT_ENABLE(10) OUTPUT_ATTEN(11) AWGN(8/9)
 G2 清径组   : PATH_ENABLE(2)=0 × hardware_paths                    # 可按径拆分（每条独立）
 G3[k] 径组  : ENABLE(2)+DELAY(3)+ATTEN(7)+PHASE(32) (+DOPPLER(4)) (+分数时延(34))   # 同径参数不跨帧
@@ -127,11 +129,12 @@ async def apply(self, plan: FramePlan) -> ApplyResult:
             state = await self._rollback()   # 尝试 RESET；连接已死/发送失败→返回 "dirty"
             return ApplyResult(committed=False, device_state=state,   # "rolled_back" | "dirty"
                                failure=at(idx, reason), ...)
-    tele = await self._request_telemetry_once()                 # ID14=0x03 单次
+    tele = await self._request_telemetry_once()                 # ID14=0x03 单次（VERIFYING 阶段独立下发，不在 G0）
     if tele.adc_overrange or tele.combiner_overflow or tele.awgn_overflow:
-        await self._rollback()
-        return ApplyResult(committed=False, failure=overflow(tele), telemetry=tele, ...)
-    return ApplyResult(committed=True, telemetry=tele, ...)
+        state = await self._rollback()                          # 同样可能 "dirty"，不得丢弃返回值
+        return ApplyResult(committed=False, device_state=state,
+                           failure=overflow(tele), telemetry=tele, ...)
+    return ApplyResult(committed=True, device_state="committed", telemetry=tele, ...)
 ```
 
 - **逐帧确认**：发下一帧前必须收到上一帧回显并比对通过（简单、可定位失败帧；吞吐留待实测,见 §9-3）。

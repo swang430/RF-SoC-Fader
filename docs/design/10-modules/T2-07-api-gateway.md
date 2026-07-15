@@ -37,7 +37,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `/sessions/{id}/close` | POST `{release}` | M6 close（DIRTY 强制 reset 由 M6 裁决，网关只透传） | control | 同步 |
 | `/sessions/{id}/recover` | POST | M6 recover（RESET+重 apply） | control | 202 |
 | `/telemetry` | GET | M8 快照服务 | read | 同步 |
-| `/telemetry/stream` | GET | M8 订阅（SSE；`Last-Event-ID` 续传于 M8 缓冲窗内） | read | SSE |
+| `/telemetry/stream` | GET | M8 订阅（SSE；`Last-Event-ID` 窗内续传，窗外流内首发 `resync` 事件指示快照重拉——EventSource 无非 200 语义） | read | SSE |
 
 - **长耗时异步化**（《T1-04》§3 约定）：202 响应体 `{job_id|session_id, poll_url}`；完成态经轮询或 SSE 事件。
 - **M8 依赖接口先行声明**（同 T2-03 定义引擎侧契约的做法）：M7 消费 `TelemetrySnapshot get_snapshot(device_id)` 与 `AsyncIterator[TelemetryEvent] subscribe(device_id, last_event_id?)`——具体语义 T2-08 为规范。
@@ -112,7 +112,9 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
   │ GET /telemetry/stream (SSE, Last-Event-ID?)
   │──────────────►│── subscribe(device, last_id) ──────────────────────►│
   │ ◄─事件流（心跳/电平/溢出告警）────────────────────────────────────────│
-  │  （断线）重连带 Last-Event-ID → M8 缓冲窗内续传，窗外回 205 全量重拉
+  │  （断线）重连带 Last-Event-ID → M8 缓冲窗内续传；窗外：仍 200 开流，
+  │   首发 `event: resync`（EventSource 收不到非 200 语义）指示先 GET /telemetry
+  │   取全量快照，随后自当前位置续流
 ```
 
 ---
@@ -128,7 +130,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | **限流** | 突发+持续超额 | 429 + Retry-After；不影响其他 key |
 | **复合 apply 透传** | CREATED 态直接 apply | 网关仅发**一次** L3 调用 `apply(auto_resolve=True)`；状态检查发生在 M6（stub 断言零状态读取） |
 | **/channels 别名** | 0/1/2 个 ACTIVE 会话三剧本 | 唯一时等价嵌套路径；否则 409 指明嵌套路径 |
-| **SSE** | 断线重连（窗内/窗外）、心跳 | Last-Event-ID 续传正确；窗外 205 |
+| **SSE** | 断线重连（窗内/窗外）、心跳 | 窗内 Last-Event-ID 续传正确；窗外首事件为 `resync` 且后续事件自当前位置连续 |
 | **SCPI 黄金** | 指令表全集 + 错误队列剧本 | 响应逐字节；与 REST 同输入同 L3 结果 |
 | **dry-run 透传** | `apply?dry_run=true` | 同步返 manifest；传输层零调用（M6 保证的网关回归） |
 

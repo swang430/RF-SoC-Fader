@@ -170,13 +170,14 @@ async def tweak(sess, channel: tuple[int,int], path: int | None,
         case "rolled_back": transition(sess, to=READY, clear_tweaks=True)
             # M2 回滚=RESET 基线：base 配置已不在设备上，会话退回 READY 待重新 apply（tweaks 清空，审计仍在）
         case "dirty":       transition(sess, to=DEVICE_DIRTY)
-            # 设备状态未知：tweaks 冻结存档；recover()=RESET+重 apply 后回到无 tweak 基线
+            # 设备状态未知：tweaks 暂留仅供诊断展示；recover()=RESET+重 apply 回 artifact 基线，
+            # ★完成时必须清空 tweaks（否则「现态=artifact+tweaks」不变式失真）——审计记录不清
     return result
 ```
 
 - **复现语义**：设备现态 = artifact（base apply）+ `tweaks` 按序重放（**仅含 committed 微调**）——tweak 不改 scenario、不改 artifact_hash，偏离被**显式记录**而非篡改基线（配置即数据不破坏；重放=`apply → 逐条 tweak`）。
 - **视图**：逐信道参数视图 = artifact 参数 + tweaks 叠加（M7 `/channels` GET 以此表达）。
-- re-apply 会重置设备到 artifact 基线：**re-apply 后 `tweaks` 清空**（其效果已被覆盖，留在审计里）。
+- **基线重置即清 tweaks**：re-apply 与 recover()（RESET+重 apply）都把设备重置到 artifact 基线——完成后 `tweaks` 一律清空（其效果已被覆盖；审计记录保留）。
 - **报告透传**：Import/Engine/Fidelity/Quant 报告随 ResolvedArtifacts 全量保留——GUI ④面板与验收都以此为据，M6 不摘要不吞。
 
 ---

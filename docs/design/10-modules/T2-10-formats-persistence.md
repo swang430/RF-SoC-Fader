@@ -30,6 +30,8 @@ registry = {
                       #   《T1-08》AscCir 后端契约 + ChannelEgine .asc 样例——T1-A1 是协议综述、不含 .asc 布局）
   "frameplan-bin/v1": # FramePlan ↔ 二进制（帧序列原样 + manifest JSON 边车——黄金帧对比的存档格式）
   "report-json/v1":   # Import/Engine/Fidelity/Quant 报告 ↔ JSON（GUI/验收复用）
+  "cdl-tdl-table-json/v1":  # 3GPP CDL/TDL 定表 ↔ JSON（T1-03c 一等定表入口，cdl_tdl_reader 消费——
+                      #   「任一层输入」的用户直录面；表无相位列，退化时相位兜底见 T2-05 §3 优先级③）
 }
 def encode(kind, obj) -> bytes ; def decode(kind, data) -> obj ; def sniff(data) -> kind
 ```

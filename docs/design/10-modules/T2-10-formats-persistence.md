@@ -26,14 +26,17 @@ M10 是全平台的「数据落地面」，四件事：
 registry = {
   "model-json/v1":    # canonical model ↔ JSON（T1-03c 全字段；复数按 (re,im) 直角坐标——内部表示约定）
   "npz-cir/v1":       # 时变 CIR 张量 ↔ NPZ（键/轴序/dtype 与 T2-03 §2 布局表逐字一致——同一契约两处引用）
-  "asc/v1":           # {(in,out): asc_text} ↔ .asc 文件集（In{i}_Out{j} 命名；行格式锚定 ChannelEgine 样例与《T1-A1》）
+  "asc/v1":           # {(in,out): asc_text} ↔ .asc 文件集（In{i}_Out{j} 命名；头/抽头行格式锚定
+                      #   《T1-08》AscCir 后端契约 + ChannelEgine .asc 样例——T1-A1 是协议综述、不含 .asc 布局）
   "frameplan-bin/v1": # FramePlan ↔ 二进制（帧序列原样 + manifest JSON 边车——黄金帧对比的存档格式）
   "report-json/v1":   # Import/Engine/Fidelity/Quant 报告 ↔ JSON（GUI/验收复用）
 }
 def encode(kind, obj) -> bytes ; def decode(kind, data) -> obj ; def sniff(data) -> kind
 ```
 
-- **版本化读写**：一切序列化产物携带 `schema_version`；解码端**向前兼容读**（旧版数据 → 迁移钩子链升到当前版），编码端只写当前版。T1-03c v1.1 升版（PortMap/origin/phase_rad 打包项）落地时，`model-json/v1 → v1.1` 迁移钩子在此实现——旧库存模型无需重导。
+- **版本化读写（版本主权分两类）**：一切序列化产物携带 `schema_version`；解码端**向前兼容读**（旧版数据 → 迁移钩子链升到当前版），编码端只写当前版。
+  - **内部格式**（model-json / report-json / frameplan-bin）：M10 迁移钩子演进——T1-03c v1.1 升版（PortMap/origin/phase_rad 打包项）落地时，`model-json/v1 → v1.1` 钩子在此实现，旧库存模型无需重导。
+  - **线缆契约镜像格式**（npz-cir 随 T2-03 §2、asc 随《T1-08》后端契约）：**布局主权在源契约，M10 只镜像注册、不独立演进**——升版=源契约先升（如引擎 v2 端点/键），M10 跟随注册新条目；黄金测试对照的就是源契约（§8）。
 - **完整性**：所有落盘产物带 sha256 边车（读取时校验，损坏显式报错不静默截断）。
 
 ---
@@ -85,7 +88,7 @@ class BlobStore:
 | 乐观锁冲突 | `VersionConflict`（携 current_version，M7→409） |
 | blob 缺失（悬空 ref） | `BlobMissing`（含 ref 与登记持有者——GC 误删可溯因） |
 | 磁盘满/IO 错 | 显式上抛（M6 事务在 apply 前失败=RESOLVE_FAILED，不产生半状态） |
-| audit 写失败 | **分级**：①**设备触达类**（apply/tweak/close 微帧/recover）——**审计先行**（write-ahead）：受理记录落盘失败 → **拒绝执行**（不触设备，503+告警）——《T1-11 §3》「所有触达设备操作必须留痕」是冻结基线，不得先斩后奏；终局记录写失败 → 事实已发生不可拒：强告警+重试队列补齐（**补齐前该设备的新触达操作一律拒**）。②非触达类（resolve 受理等）——尽力而为+强告警 |
+| audit 写失败 | **分级**：①**设备触达类**（apply/tweak/close 微帧/recover）——**审计先行**（write-ahead）：受理记录落盘失败 → **拒绝执行**（不触设备，503+告警）——《T1-11 §3》「所有触达设备操作必须留痕」是冻结基线，不得先斩后奏；终局记录写失败 → 事实已发生不可拒：强告警+重试队列补齐（**补齐前该设备的新触达操作一律拒**）。②非触达类生命周期操作（resolve 受理/终局等）——不作执行前置（无物理副作用，不因审计库抖动拒服务），但**同样必须持久**：写失败进同一重试队列补齐——T2-06 §2「生命周期全记录、无轮询也闭合」的承诺不因此打折；仅纯读请求零审计（T2-07 §4） |
 
 ---
 
@@ -122,7 +125,7 @@ class BlobStore:
 
 ## 10. 本篇验收
 
-- 五类 codec 往返黄金 + NPZ/asc 与既有契约（T2-03 §2/T1-A1）逐键核对全绿。
+- 五类 codec 往返黄金 + NPZ/asc 与源契约（NPZ→T2-03 §2；asc→《T1-08》+ChannelEgine 样例）逐键核对全绿。
 - 乐观锁/append-only/内容寻址/blob 生命周期测试全绿。
 - 原子写注入测试与 T2-06 重启恢复用例联合通过（数据面自洽）。
 - T1-03c v1.1 迁移钩子演练：v1 样本无损升级（升版 PR 的存储侧预案）。

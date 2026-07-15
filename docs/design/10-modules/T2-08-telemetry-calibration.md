@@ -25,11 +25,11 @@ M8 由两半组成，共享「数值域」职责、零设备写操作：
 ```
 M2 dispatcher ──TelemetryFrame──► normalize（M1 换算：码值→物理量，原码保留）
       │                                │
-      │（apply 期的单次遥测 0x03 同样流经──► TelemetrySnapshot{device_id, event_id, ts,
-      │  此路径：M8 容忍突发/乱序，        │    inputs[8]{level, power, adc_overrange},
-      │  event_id 由 M8 单调赋值）        │    outputs[8]{power_clean, power_noisy, level,
-      │                                │             combiner_overflow, awgn_overflow},
-      ▼                                │    raw: TelemetryFrame}
+      │（apply 期的 0x03 单次遥测归 M2 事务──► TelemetrySnapshot{device_id, event_id, ts,
+      │  捕获队列消费——见 §5；M8 只收      │    inputs[8]{level, power, adc_overrange},
+      │  dispatcher 转发帧，容忍突发/乱序， │    outputs[8]{power_clean, power_noisy, level,
+      │  event_id 由 M8 单调赋值）        │             combiner_overflow, awgn_overflow},
+      ▼                                │    raw: TelemetryFrame, origin: periodic|apply_verify}
    活性监控（周期帧超时→alarm）          ▼
                                   环形缓冲（N 条，event_id 单调递增）──► get_snapshot / subscribe / 告警引擎
 ```
@@ -38,7 +38,8 @@ M2 dispatcher ──TelemetryFrame──► normalize（M1 换算：码值→物
 class TelemetryService:
     def get_snapshot(self, device_id) -> TelemetrySnapshot | None      # 最近一帧（无数据=None，非报错）
     def subscribe(self, device_id, last_event_id=None) -> AsyncIterator[TelemetryEvent]
-        # TelemetryEvent = snapshot | alarm | heartbeat | resync（T2-07 SSE 语义的数据源）：
+        # TelemetryEvent = snapshot | alarm | advice | heartbeat | resync（T2-07 SSE 语义的数据源；
+        #   advice=校准域溢出建议 §3.4——与告警同流，单一订阅面）：
         # - last_event_id 在缓冲窗内 → 自该点续传；窗外/无效 → 首发 resync 事件（指示先取快照）再自当前续流
         # - heartbeat：无新帧时按固定间隔合成（下游连接保活；不入环形缓冲）
         # - 慢消费者：队列满 → 丢最旧 + 强制补发 resync（不阻塞采集路径，不静默丢失）
@@ -90,7 +91,11 @@ def bypass_atten_db(mode: Literal["rf","if"]) -> float:
 ```python
 def input_level_advice(signal_papr_db: float = DEFAULT_PAPR_5G) -> LevelAdvice:
     # ADC 输入参考 −20 ～ −10 dBm（硬件确认）；建议均值功率 = 上限 − PAPR 余量：
-    #   recommended = (−20 dBm, −10 dBm − signal_papr_db)
+    #   upper = −10 − signal_papr_db
+    #   ★倒置守卫：PAPR > 10 dB 时 upper < −20（参考窗只有 10 dB，容不下该 PAPR）——
+    #     不返回倒置区间：LevelAdvice(feasible=False, peak_safe_mean_dbm=upper,
+    #       note="建议削峰/CFR；或按峰值约束取均值 ≤ upper 并接受低于参考下限的 SNR 损失")
+    #   否则 recommended = (−20 dBm, upper)，feasible=True
     # DEFAULT_PAPR_5G 为保守占位（5G OFDM PAPR 调研未决，N1）——参数化：调研结论落地只改默认值
     # 产出同时给出告警阈值（§2.2 电平越限规则的数据源，经 M10 配置下发）
 ```
@@ -127,7 +132,7 @@ CalibrationService.overflow_guard(snapshot) -> list[Advice]
 ## 5. 与 M2 的采集契约
 
 - **遥测节奏是 M2 连接级配置**（0x01/0x02 周期档，连接建立即设、apply 后恢复——T2-02 §4）：M8 **不发任何控制帧**；节奏变更=部署配置项（经 M2 连接参数），非运行时 API。
-- apply 期间 M2 的单次遥测请求（0x03）产生的帧同样流经 dispatcher——M8 容忍突发与间隔抖动，`event_id` 由 M8 单调赋值（与设备节奏解耦）。
+- **apply 期 0x03 单次遥测归 M2 事务捕获队列**（T2-02 §4 VERIFYING 的 `_await_telemetry` 消费它做核验——M8 不得截流）；M2 核验完成后把该帧**转发** dispatcher 一份（`origin=apply_verify` 标注），M8 作普通快照入流——不转发则 M8 无感知。M8 容忍突发与间隔抖动，`event_id` 由 M8 单调赋值（与设备节奏解耦）。
 - 活性监控以「配置节奏周期 × K」为超时基准（K 默认 3，M10 配置）；`device_silent` 告警清除条件=恢复收帧。
 
 ---
@@ -155,7 +160,7 @@ CalibrationService.overflow_guard(snapshot) -> list[Advice]
 | **活性** | 停喂帧 > K×周期 | `device_silent` 触发；恢复喂帧后清除 |
 | **谱归一黄金** | Jakes 谱与平坦谱各一组 coeffs | norm_gain 与解析能量比一致（1e-12 容差）；per_tap/total 两模式 |
 | **bypass 未标定** | None 表调用 | UncalibratedError 且指明 N2 |
-| **电平指引** | PAPR 参数扫描 | 建议区间单调、不超 ADC 上限 |
+| **电平指引** | PAPR 参数扫描（含 >10 dB） | 建议区间单调、不超 ADC 上限；PAPR>10 dB 返回 feasible=False（绝不产生倒置区间） |
 | **溢出建议** | 构造合路溢出快照 | Advice 定位正确、建议衰减量 ≥ 反推下限 |
 
 ---

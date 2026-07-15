@@ -31,13 +31,14 @@ def load(path: str) -> RawRtTable:
     link  = require_columns(db.link,  ["TX","RX","TX_ANT_POSITION","RX_ANT_POSITION"])
     chan  = require_columns(db.channel, ["LINK_ID","DELAY","H","AOA","ZOA","AOD","ZOD","CHANNEL_TYPE"])
     return RawRtTable(
-        links = to_numpy(link),          # tx/rx 索引 + 收发天线世界坐标(m)
+        links = with_synthetic_link_id(to_numpy(link)),   # ★LINK 表无 LINK_ID 列（手册 §2.1）——
+        #   CHANNEL.LINK_ID 是 LINK 表的行索引：读取时合成 link_id = 行号(0-based)作为主键
         rays  = to_numpy(chan),          # 每径: delay[s], H[complex], 角度[deg, 天顶], type
     )
 ```
 
 - **schema 校验**：缺列/空表/维度不符 → `ValueError`（列名与期望型别入错误信息）。
-- **外键完整性**：`CHANNEL.LINK_ID ⊆ LINK` 主键集——孤儿径（引用不存在 LINK 的行）**默认报错**；宽松模式（可配）下丢弃并计入 ImportReport，**不得静默**（按链路迭代建模会无声吞掉孤儿径）。
+- **外键完整性**：`CHANNEL.LINK_ID ∈ [0, len(LINK))`（LINK 主键=合成的行索引）——孤儿径（引用不存在 LINK 的行）**默认报错**；宽松模式（可配）下丢弃并计入 ImportReport，**不得静默**（按链路迭代建模会无声吞掉孤儿径）。
 - **不做任何单位换算**：DELAY 保持秒、角度保持度·天顶角——与 canonical 约定一致（《T1-03c》§2），**导入是"结构搬运"**；仰角换算只发生在需要它的消费者（.asc 导出）。
 
 ---
@@ -98,7 +99,7 @@ def import_mpdb(source, arrays: {tx: AntennaArray, rx: AntennaArray},
     raw = mpdb_reader.load(source)                       # §2
     resolution = validate_link_table(raw.links, portmap.link_mode, arrays,  # §3.1 分模式核验（端点集合/单链路）
                         identity_by=cfg.identity_by,            # 身份解析策略与容差随调用显式传入
-                        epsilon_m=cfg.position_epsilon_m)
+                        epsilon_m=cfg.position_epsilon_m, frame=cfg.frame)  # frame 声明随调用传入（§3.1 世界系前提）
     # resolution: link_id → (tx_elem, rx_elem)。★解析结果必须回填模型（见下 Link 构造）——
     # position 模式下原始 TX/RX 是设备端点号，若原样入模型，M5 按阵元号消费会错位
     validate_portmap(portmap, ValidationContext(                # §3.2 V1–V6：上下文完整传入——

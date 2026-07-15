@@ -71,7 +71,7 @@ class BlobStore:
     def pin(ref, owner) / unpin(ref, owner)              # 引用计数：scenario/session/model 持有者登记
 ```
 
-- **10MB 规则的唯一落点**（《T1-03c》§7）：`attach_cir` 等调用方只调 `inline_or_ref(data)`——≤10MB 返回内联字节、>10MB 落 blob 返 `cir_ref`。阈值为 M10 常量，全平台不散落第二处。
+- **10MB 规则的唯一落点**（《T1-03c》§7）：判定按 **npz-cir 序列化后的载荷总量**——≤阈值：CIR **保持冻结 schema 的原字段形态内联**（逐 `Tap.gain_series: Complex[n_snapshots]`，**不是 M10 自造的字节内联形态**——内联即无 M10 中间表示）；>阈值：整体按 `npz-cir/v1` 落 blob、模型侧置 `cir_ref`（gain_series 不承载）。阈值为 M10 常量、判定 helper 唯一（`attach_cir` 调用处），全平台不散落第二处。
 - **GC**：引用计数归零的 blob 进延迟回收队列（宽限期防误删——审计留痕）；`pin/unpin` 随持有者生命周期由 repository 层自动维护，业务不手工管理。
 - .asc 产物与 FramePlan 存档同走 blob（M7 `/artifact` 端点经 `open_stream` 流式直出）。
 

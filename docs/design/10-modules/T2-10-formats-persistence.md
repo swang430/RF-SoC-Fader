@@ -33,7 +33,11 @@ registry = {
   "cdl-tdl-table-json/v1":  # 3GPP CDL/TDL 定表 ↔ JSON（T1-03c 一等定表入口，cdl_tdl_reader 消费——
                       #   「任一层输入」的用户直录面；表无相位列，退化时相位兜底见 T2-05 §3 优先级③）
 }
-def encode(kind, obj) -> bytes ; def decode(kind, data) -> obj ; def sniff(data) -> kind
+def encode(kind, obj) -> bytes ; def decode(kind, data, meta=None) -> obj
+def sniff(data, meta=None) -> kind
+    # ★镜像格式的版本在元数据边车而非载荷（下）——sniff/decode 须收 meta：载荷字节只能识别「族」
+    #   （NPZ 容器/asc 文本/JSON），版本取自 meta；无 meta 的裸文件（外部导入场景）按族+源契约
+    #   当前版处理并显式标注该假定（不静默猜版本）
 ```
 
 - **版本化读写（版本主权分两类）**：**内部格式**在载荷内携带 `schema_version`，解码端**向前兼容读**（旧版数据 → 迁移钩子链升到当前版）、编码端只写当前版；**镜像格式载荷不加任何自有字段**（键集/头由源契约固定——NPZ 无 schema_version 键、asc 无额外头，设备/引擎按源契约直接消费），其版本记在 M10 **元数据边车/注册条目**上（与 sha256 边车同层，不进载荷）。
@@ -107,7 +111,7 @@ class BlobStore:
 
 | 类别 | 内容 | 判据 |
 | :-- | :-- | :-- |
-| **序列化往返黄金** | 五类 codec 各取代表样本（含满字段 canonical model） | 往返逐字节/逐字段无损；NPZ 布局与 T2-03 表逐键一致 |
+| **序列化往返黄金** | **六类** codec 各取代表样本（含满字段 canonical model 与 3GPP 定表 JSON） | 往返逐字节/逐字段无损；NPZ 布局与 T2-03 表逐键一致；裸文件无 meta 嗅探走「族+当前版」显式假定路径 |
 | **版本迁移** | 构造 v1 旧样本 → 升级钩子 → 当前版 | 字段映射正确；SchemaTooNew 路径显式 |
 | **完整性** | 篡改落盘字节 | CorruptData（不返回部分数据） |
 | **乐观锁** | 并发创建同 scenario 新版本 | 恰一成功，余 VersionConflict 携 current_version |
@@ -127,7 +131,7 @@ class BlobStore:
 
 ## 10. 本篇验收
 
-- 五类 codec 往返黄金 + NPZ/asc 与源契约（NPZ→T2-03 §2；asc→《T1-08》+ChannelEgine 样例）逐键核对全绿。
+- 六类 codec 往返黄金 + NPZ/asc 与源契约（NPZ→T2-03 §2；asc→《T1-08》+ChannelEgine 样例）逐键核对全绿。
 - 乐观锁/append-only/内容寻址/blob 生命周期测试全绿。
 - 原子写注入测试与 T2-06 重启恢复用例联合通过（数据面自洽）。
 - T1-03c v1.1 迁移钩子演练：v1 样本无损升级（升版 PR 的存储侧预案）。

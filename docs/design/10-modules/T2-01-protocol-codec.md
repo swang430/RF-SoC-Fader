@@ -147,7 +147,11 @@ class DownlinkParser:
         frames = []
         while True:
             i = self._buf.find(b"\xFD\xB1\x85")          # ① 扫描帧头前缀
-            if i < 0: self._buf.clear(); break            #    无前缀→丢弃（记日志）
+            if i < 0:                                     #    无完整前缀：不能整段清空——
+                keep = tail_prefix_len(self._buf)         #    尾部可能是被分片切断的帧头（"FD"/"FD B1"）
+                drop(len(self._buf) - keep)               #    只丢弃确定无用的部分，保留 ≤2B 尾巴等下一分片
+                break
+    # tail_prefix_len(buf)：buf 的最长后缀同时是 b"FD B1 85" 真前缀的长度（0/1/2）
             if i > 0: drop(i)                             #    前缀前垃圾→丢弃并计数
             if len(self._buf) < 4: break                  # ② 等第 4 字节（帧型）
             kind = self._buf[3]
@@ -213,7 +217,7 @@ M2: render→[M1 encode]→bytes →TCP→ 设备
 | **边界值** | 每换算函数 min/max/越界（0/1050、±2²⁷、k=100、width<period、透传 1/255B、分数时延枚举） | 越界必 `ValueError`；边界值正确 |
 | **往返** | 物理量→码值→物理量 误差 ≤ 半个量化步长 | 量化一致性 |
 | **遥测解码** | 构造 131B fixture（含过载/溢出位）→ 字段逐一断言 | 与布局表一致 |
-| **流式解析** | 同一帧序列按 1B/7B/整帧/跨帧任意切片喂入 → 产出帧集相同；帧间插入垃圾字节/截断帧 → 重同步且 stats 正确 | **TCP 分片鲁棒性**（M2 依赖的关键性质） |
+| **流式解析** | 同一帧序列按 1B/7B/整帧/跨帧任意切片喂入 → 产出帧集相同；**分片恰好切在帧头内部**（缓冲尾余 `FD`/`FD B1`）帧不得丢失；帧间插入垃圾字节/截断帧 → 重同步且 stats 正确 | **TCP 分片鲁棒性**（M2 依赖的关键性质） |
 | **回显比对** | 正/负例（改 1 字节、改帧头、截尾） | 判定正确 |
 | **回归基线** | 现 `tests/test_protocol.py` 全绿不动 | 不破坏既有字节格式 |
 

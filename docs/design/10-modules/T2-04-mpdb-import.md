@@ -65,7 +65,7 @@ class PortMap:
 
 - 模式由导入配置显式声明 + 对 LINK 表做**分模式核验**（不猜）：
   - `per_element_pair`：校验**端点集合** `{(TX,RX)} == tx_elements × rx_elements`（笛卡尔积集合相等，**非仅数量**——数量相等仍可能重复+缺失并存，静默污染 MIMO 矩阵）；报错列出**重复项与缺失项**明细；
-  - `single_reference`：`len(links)==1`；
+  - `single_reference`：`len(links)==1` **且**该 LINK 的 TX/RX 索引为有效参考点（在提供的 arrays 元素域内）——只查数量会放过端点悬空的库；
   - 均不符→明确报错并提示两种合法形态。
 - 两种模式产出同一 RT 层 schema（single_reference 时 `environment` 只有参考 LINK，合成结果由 M5 产出为 TDL 层）。
 
@@ -141,7 +141,9 @@ def quantize_delays(delay_s: ndarray) -> tuple[ndarray, QuantReport]
     # ★不得夹到端点 bin——夹取会把不存在的能量堆到 0/1050）；
     # QuantReport = {dropped_low/high 计数 + 丢弃掩码}，并入 ImportReport（§6），不静默
 def merge_bins(delay_code, gain) -> list[Bin]               # 同 bin 复增益相干叠加（保相位）；noncoherent 仅用于功率统计
-def select_strongest(bins, k≤24) -> list[Bin]               # 按功率截断，按时延排序
+def select_strongest(bins, k≤24, power_mode) -> list[Bin]   # ★排序功率按 power_mode 取：
+                                                            #   coherent=|Σgain|²（相消干涉计入），noncoherent=Σ|gain|²——
+                                                            #   两者可选出不同的最强径集合，必须显式入参而非隐式默认
 def normalize(bins, ref: float) -> list[Bin]                # ★ref 由 M5 传入（全系统共享基准，《T1-06》要点 2）——
                                                             #   本函数不得自行取局部 max（旧 tdl.py 行为，B 方案已废）
 ```

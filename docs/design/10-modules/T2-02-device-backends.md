@@ -1,0 +1,200 @@
+# T2-02 · M2 设备后端与传输（功能设计）
+
+> 第二册《功能设计》· 第 2 篇（L2 层）
+> 状态：草稿 v0.1 · 待评审
+> 依据：《T1-08 多设备后端》《T1-11 §1 事务化下发》《T1-12 §0/#1/#5/N4》（冻结基线）；依赖 **M1（T2-01）** 的编码/解析/回显比对
+> 消费方：M6（会话编排调用 apply）、M8（消费遥测回调）
+
+---
+
+## 1. 概述与定位
+
+M2 是 **L2 设备后端层**：把 canonical model（`level=TDL`）渲染为设备原生产物并**事务化**送达设备。两个实现：
+
+- **`RFSoCBackend`**：协议 V3.0 帧序列 → TCP 下发 → 回显/遥测闭环（找回并升级原脚本丢失的下发能力）。
+- **`AscCirBackend`**：time_varying 模型 → `.asc` 文件集（通用 CIR 交换格式，《T1-12》#3）。
+
+**非职责**：字节编解码与单位换算（→M1）；模型计算/退化（→L3）；会话/场景生命周期（→M6）；遥测的业务解释（→M8）；`DeviceRegistry` 多设备管理（→L3，《T1-10》）。
+
+---
+
+## 2. 接口契约
+
+```python
+@dataclass(frozen=True)
+class BackendCapabilities:
+    supports_time_varying: bool     # rfsoc: False（当前设备）；asc: True
+    supports_cir: bool              # rfsoc: False（《T1-12》#1）；asc: True
+    max_paths: int = 24
+    grid: str = "8x8"
+    if_freq_max_hz: float = 2.6e9   # 当前中频上限（《T1-12》N4）
+    polarization: str = "xpr_conducted"   # 传导=XPR 归约（《T1-03c》§5.3）
+    multi_frame_atomic: bool = False      # 设备无跨帧原子性（《T1-12》#5）
+
+class DeviceBackend(Protocol):
+    capabilities: BackendCapabilities
+    def render(self, model: CanonicalChannelModel, addr: ChannelAddress|None) -> Artifact: ...
+        # 纯函数：模型→产物；不触设备（支撑 dry-run 与黄金对比）
+    def apply(self, artifact: Artifact) -> ApplyResult: ...
+        # 送达设备（事务化）或写文件
+    def readback(self) -> TelemetryFrame | None: ...   # asc: None
+
+# 产物与结果
+@dataclass(frozen=True)
+class FramePlan:                    # RFSoC 产物
+    frames: tuple[bytes, ...]       # 每帧自包含 ≤4000B payload（§4）
+    manifest: tuple[FrameInfo, ...] # 每帧摘要（组列表/字节数），供审计与 dry-run 展示
+@dataclass(frozen=True)
+class AscFileSet:                   # Asc 产物：{(in,out): asc_text}
+    files: Mapping[tuple[int,int], str]
+
+@dataclass(frozen=True)
+class ApplyResult:
+    committed: bool
+    frames_sent: int; frames_verified: int
+    failure: FailureInfo | None     # 首个失败帧/原因（echo 不符/超时/错误帧/溢出）
+    telemetry: TelemetryFrame | None
+```
+
+- **render/apply 分离**（《T1-08》§2）：`dry_run` = 只调 render。
+- L3 下发前按 `capabilities` 校验（time_varying→rfsoc 拒绝等，能力协商见《T1-08》§6）。
+
+---
+
+## 3. RFSoCBackend.render：子帧编组 → 帧预算切分
+
+设备**不支持多帧原子性**（《T1-12》#5）→ 切分的正确性要求：**每帧自包含、语义组不跨帧、顺序保持**。
+
+### 3.1 子帧分组（组=不可拆的原子单位）
+
+```
+G0 前导组   : RESET(13) [+COPY_RETURN(15)=1 +INFO_RETURN(14)]     # 必须整组位于第一帧之首
+G1 全局组   : GLOBAL_ENABLE(1) OUTPUT_ENABLE(10) OUTPUT_ATTEN(11) AWGN(8/9)
+G2 清径组   : PATH_ENABLE(2)=0 × hardware_paths                    # 可按径拆分（每条独立）
+G3[k] 径组  : ENABLE(2)+DELAY(3)+ATTEN(7)+PHASE(32) (+DOPPLER(4)) (+分数时延(34))   # 同径参数不跨帧
+G4[k] 瑞利组: RAYLEIGH_ENABLE(5)+COEFFS(6,1028B 子帧)              # 大组，单独成帧的主要因素
+G5 收尾组   : FREQ_PHASE_ZERO(33)（若写了多普勒）                   # 位于最后一帧之尾
+```
+
+### 3.2 切分算法（贪心装帧，伪代码）
+
+```python
+def plan_frames(groups: list[Group], budget=4000) -> FramePlan:
+    frames, cur = [], []
+    for g in groups:                        # groups 已按 G0..G5 语义顺序排列
+        if size(g) > budget:                # 单组超帧长（理论上仅可能是未来大组）
+            raise ValueError("group exceeds frame budget")   # 设计期即保证不发生：1028B 瑞利组 < 4000
+        if sum(size(x) for x in cur) + size(g) > budget:
+            frames.append(seal(cur)); cur = []
+        cur.append(g)
+    frames.append(seal(cur))
+    assert frames[0].starts_with(G0) and order_preserved(frames)
+    return FramePlan(frames=..., manifest=...)
+```
+
+- **容量核算**（设计期验证可行性）：单信道满配 24 径 = G0(12B)+G1(~20B)+24×G3(~28B)+G5 ≈ 0.7KB → **单帧即可**；带瑞利 24×G4(1032B) ≈ 24.8KB → **约 8 帧**；64 信道满配另计（逐信道对顺序下发）。
+- 每帧经 M1 `build_control_frame` 封装（payload≤4000 由预算保证，双保险仍走 M1 校验）。
+
+---
+
+## 4. RFSoCBackend.apply：事务状态机（核心）
+
+无跨帧原子性 → 事务由上位机补偿（《T1-11》§1）。**回滚基线 = RESET**（协议无参数读回，《T1-A1》§6）。
+
+```
+IDLE ──apply(plan)──► APPLYING ──全帧 echo 通过──► VERIFYING ──遥测通过──► COMMITTED
+                        │                              │
+                        │ echo 不符/超时/错误帧          │ 溢出/电平异常
+                        ▼                              ▼
+                     ROLLING_BACK ──发 RESET──► ROLLED_BACK(带 FailureInfo)
+```
+
+```python
+async def apply(self, plan: FramePlan) -> ApplyResult:
+    await self._ensure_connected()
+    for idx, frame in enumerate(plan.frames):
+        await self._tx(frame)
+        echo = await self._await_echo(timeout=ECHO_TIMEOUT)     # M1 DownlinkParser 产出
+        if echo is ERROR_FRAME or echo is TIMEOUT or not verify_copy_echo(frame, echo):
+            await self._rollback()                              # RESET 到已知基线
+            return ApplyResult(committed=False, failure=at(idx, reason), ...)
+    tele = await self._request_telemetry_once()                 # ID14=0x03 单次
+    if tele.adc_overrange or tele.combiner_overflow or tele.awgn_overflow:
+        await self._rollback()
+        return ApplyResult(committed=False, failure=overflow(tele), telemetry=tele, ...)
+    return ApplyResult(committed=True, telemetry=tele, ...)
+```
+
+- **逐帧确认**：发下一帧前必须收到上一帧回显并比对通过（简单、可定位失败帧；吞吐留待实测,见 §9-3）。
+- **幂等**：同一 FramePlan 重放结果一致（G0 的 RESET 保证从已知基线开始）。
+- **回滚语义注意**：协议 RESET **保留瑞利系数与输出衰减**（《T1-A1》§4）→ 回滚后这两类残留；事务上以「回滚 = 回到安全基线（全局/多径禁用）」定义，不承诺字节级还原（记入 ApplyResult 提示）。
+
+---
+
+## 5. Transport（asyncio TCP）与连接管理
+
+```python
+class TcpTransport:
+    async def connect(host, port, timeout) ; async def close()
+    async def send(data: bytes)
+    # 接收循环：chunk → M1 DownlinkParser.feed() → 按帧型分发：
+    #   CopyEcho → apply 的等待队列；Telemetry → 回调(M8/遥测循环)；
+    #   Error → 当前事务失败信号；SerialPassthrough → 透传回调
+```
+
+- **活性判据**：协议无心跳——用**周期遥测**（ID14=0.5s/1s）作链路活性信号；超过 N 个周期无遥测 → 判定 degraded。
+- **断连/重连**：重连成功后设备状态**未知** → 后端置 `dirty`，L3 需重新 apply 才能回到 COMMITTED（不静默恢复）。
+- **并发**：同一设备同一时刻仅一个 apply 事务（后端内互斥）；多设备互斥归 L3（《T1-10》）。
+
+---
+
+## 6. AscCirBackend
+
+```python
+def render(model) -> AscFileSet:
+    # 要求 model.realization=CIR 或由 static taps 采样生成；每信道对一份 .asc：
+    # header: N CIRs / T Taps/CIR / update_rate / carrier_freq（《T1-08》§4.2）
+    # 行: 每时刻 T 组 [delay_s, re, im]；天顶→仰角等消费者侧换算在此进行（《T1-03c》§2）
+def apply(fileset) -> ApplyResult:   # 写文件（路径策略经 M10 I/O 适配层）；committed=写盘成功
+def readback() -> None
+```
+- capabilities：`supports_time_varying=True, supports_cir=True`（A 档数据的现实出口，《T1-12》#1/#3）。
+
+---
+
+## 7. 错误处理（分类）
+
+| 类别 | 触发 | 处置 |
+| :-- | :-- | :-- |
+| 传输错误 | 连接失败/中途断连/发送异常 | 重试(有限次)→degraded；事务中→回滚+失败上报 |
+| 协议错误 | 错误帧(FDB185FF)/echo 不符/echo 超时 | 立即回滚；FailureInfo 带帧号与差异摘要 |
+| 设备异常 | 遥测溢出位/电平越限 | 回滚；遥测快照随结果返回（供 M8/GUI） |
+| 能力拒绝 | 模型要求超出 capabilities | render 前即拒（不触设备），明确错误 |
+- 所有 apply（含失败）写审计日志（《T1-11》§3）：时间/设备/FramePlan manifest 摘要/结果。
+
+---
+
+## 8. 测试设计（本模块）
+
+| 类别 | 内容 | 判据 |
+| :-- | :-- | :-- |
+| **切分属性** | 随机模型生成 FramePlan：每帧 payload≤4000B；组不跨帧；顺序保持；G0 在首帧头、G5 在尾帧尾 | 属性全成立（含 24 径+瑞利满配 ≈8 帧 的边界例） |
+| **事务（假设备）** | 本地 asyncio TCP 假设备（回显/篡改 1 字节/超时/回错误帧/中途断连/遥测置溢出位六种剧本） | commit/rollback 判定与 FailureInfo 定位正确；回滚必发 RESET |
+| **幂等** | 同一 FramePlan 连发两次 | 帧序列字节一致、结果一致 |
+| **dry-run** | render 不建立任何连接（socket 层断言） | 纯函数性 |
+| **AscCir 黄金** | 已知 canonical → .asc 与 ChannelEgine 样例格式逐行比对 | 格式/数值一致 |
+| **能力协商** | time_varying 模型 → RFSoCBackend | render 前被拒且不触网络 |
+| **环回集成** | 假设备跑通「render→apply→commit」全链（T3-03 HIL 的软前身） | 端到端绿 |
+
+---
+
+## 9. 开放问题
+1. **RESET 残留**（瑞利系数/输出衰减不被复位）与回滚语义的对外表述——是否需要「深度回滚」（显式写默认值覆盖）选项。
+2. **遥测竞态**：apply 期间周期遥测与单次请求（ID14=0x03）并存时的归属判定（以请求后首帧为准？）——实现时与设备实测。
+3. **逐帧确认的吞吐**：64 信道满配多帧串行 RTT 累积；若实测过慢，再评估流水化（需设备回显顺序保证，硬件确认）。
+4. 帧间是否需要 pacing（设备处理间隔）——实测定。
+
+## 10. 本篇验收
+- FramePlan 切分满足「自包含/组不跨帧/顺序/预算」四属性且容量核算成立。
+- 假设备六剧本下事务判定全部正确；dry-run 零副作用。
+- M6 可仅凭本模块接口（render/apply/readback/capabilities）编排会话。

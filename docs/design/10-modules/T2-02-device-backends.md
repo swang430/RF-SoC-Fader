@@ -84,7 +84,9 @@ class ApplyResult:
 G0 前导组   : RESET(13) [+COPY_RETURN(15)=1]                       # 必须整组位于第一帧之首
              # ★INFO_RETURN(14) 不入 G0：单次遥测请求(0x03)由 apply 在 VERIFYING 阶段独立下发——
              #  若随首帧发出，多帧场景下设备在第一帧后即回遥测（反映部分配置），污染核验（§4）
-G1 全局组   : GLOBAL_ENABLE(1) OUTPUT_ENABLE(10) OUTPUT_ATTEN(11) AWGN(8/9)
+G1a 全局使能: GLOBAL_ENABLE(1)                                     # 全事务仅一次
+G1b[out] 输出组: OUTPUT_ENABLE(10)+OUTPUT_ATTEN(11)+AWGN(8/9)      # ★按输出端参数（io=0/out）——
+             # 计划涉及的**每个输出端各配一组**，否则其余输出端停留在 RESET 默认态（未使能）
 G2 清径组   : PATH_ENABLE(2)=0 × hardware_paths                    # 可按径拆分（每条独立）
 G3[k] 径组  : ENABLE(2)+DELAY(3)+ATTEN(7)+PHASE(32) (+DOPPLER(4)) (+分数时延(34))   # 同径参数不跨帧
 G4[k] 瑞利组: RAYLEIGH_ENABLE(5)+COEFFS(6,1028B 子帧)              # 大组，单独成帧的主要因素
@@ -107,8 +109,8 @@ def plan_frames(groups: list[Group], budget=4000) -> FramePlan:
     return FramePlan(frames=..., manifest=...)
 ```
 
-- **容量核算**（设计期验证可行性）：单信道满配 24 径 = G0(12B)+G1(~20B)+24×G3(~28B)+G5 ≈ 0.7KB → **单帧即可**；带瑞利 24×G4(1032B) ≈ 24.8KB → **约 8 帧**。
-- **★多信道 = 单一事务单一 FramePlan**：**RESET(13) 是全局复位**——若逐信道对各自成 FramePlan（各带 G0），配第 k 个信道会抹掉前 k−1 个的配置。正确结构：`G0+G1 仅一次（事务首帧）→ 逐信道对的 G2/G3/G4 组序列（io 各异）→ G5 一次（尾帧）`；64 信道满配为多帧、但**整个事务只含一个 RESET**。`plan_frames` 断言补充：**G0 在全计划中恰出现一次**且位于首帧之首。
+- **容量核算**（设计期验证可行性）：单信道满配 24 径 = G0(12B)+G1a+G1b(~20B)+24×G3(~28B)+G5 ≈ 0.7KB → **单帧即可**；带瑞利 24×G4(1032B) ≈ 24.8KB → **约 8 帧**。
+- **★多信道 = 单一事务单一 FramePlan**：**RESET(13) 是全局复位**——若逐信道对各自成 FramePlan（各带 G0），配第 k 个信道会抹掉前 k−1 个的配置。正确结构：`G0+G1a 仅一次（事务首帧）→ G1b[out]×每使用输出端 → 逐信道对的 G2/G3/G4 组序列（io 各异）→ G5 一次（尾帧）`；64 信道满配为多帧、但**整个事务只含一个 RESET**。`plan_frames` 断言补充：**G0 在全计划中恰出现一次**且位于首帧之首。
 - 每帧经 M1 `build_control_frame` 封装（payload≤4000 由预算保证，双保险仍走 M1 校验）。
 
 ---
@@ -148,7 +150,7 @@ async def apply(self, plan: FramePlan) -> ApplyResult:
                                             u8(self._telemetry_cadence))])   # 恢复 0x01/0x02（配置的周期档）
     await self._tx(restore)
     r_echo = await self._await_echo(timeout=ECHO_TIMEOUT)
-    if r_echo is TIMEOUT or not verify_copy_echo(restore, r_echo):
+    if r_echo is ERROR_FRAME or r_echo is TIMEOUT or not verify_copy_echo(restore, r_echo):
         log.warning("cadence-restore echo 异常")                # 不回滚配置（已核验通过），但记告警并标记活性待观察
     if tele.adc_overrange or tele.combiner_overflow or tele.awgn_overflow:
         state = await self._rollback()                          # 同样可能 "dirty"，不得丢弃返回值

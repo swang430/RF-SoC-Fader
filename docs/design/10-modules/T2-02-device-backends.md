@@ -144,7 +144,8 @@ async def apply(self, plan: FramePlan) -> ApplyResult:
     # ★0x03 = 「单次后关闭」（《T1-A1》）——取到核验帧后必须恢复周期节奏，
     #   否则 §5 依赖的遥测活性信号熄灭。恢复帧自身也是控制帧（会产生回显），
     #   必须同样等待并核验其 echo，否则残留队列会污染下一事务的匹配：
-    restore = encode_info_return(self._telemetry_cadence)       # 恢复 0x01/0x02（配置的周期档）
+    restore = build_control_frame([SubFrame(ParamID.INFO_RETURN,   # ★子帧须经 M1 封装为完整控制帧再发送
+                                            u8(self._telemetry_cadence))])   # 恢复 0x01/0x02（配置的周期档）
     await self._tx(restore)
     r_echo = await self._await_echo(timeout=ECHO_TIMEOUT)
     if r_echo is TIMEOUT or not verify_copy_echo(restore, r_echo):

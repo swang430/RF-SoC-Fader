@@ -32,6 +32,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `/sessions/{id}` | GET | 状态机态 + reports + last_apply + **last_error**（异步失败的结构化错误，T2-06 §2——RESOLVE_FAILED 等终态的唯一定位来源，直译 §3 problem+json 扩展字段）+ tweaks | read | 轮询 |
 | `/sessions/{id}/resolve` | POST | M6 `submit_resolve`（任务在 M6 运行器内，网关不持协程，T2-06 §4 提交面） | control | **202** |
 | `/sessions/{id}/apply` | POST `?dry_run=` | M6 `submit_apply(auto_resolve=True)`——CREATED 态由 **M6 内部**先 resolve 再 apply；dry_run=true 走同步 `apply(dry_run=True)` 直返 manifest（**仅 READY/ACTIVE**：CREATED 时 M6 抛 InvalidState → 409 指明先 resolve——物化长耗时不得混入同步路径）。网关不检查状态、不编排、不持协程（单次 L3 调用） | control | 202（dry_run 同步返 manifest） |
+| `/sessions/{id}/artifact` | GET `?channel=&format=` | **产物下载**（READY 起可用，M6 artifacts 缓存直出、零设备触达）：asc→全信道 zip 或 `?channel=i_o` 单文件 text/plain；rfsoc→帧序列 octet-stream 或 `?format=manifest` 摘要 JSON。CI 黄金对比与《T1-04》G4「同 scenario 产两种后端产物」的取回面（SDK `apply(out=...)` 即封装此端点落盘）；CREATED 态 → 409 指明先 resolve | read | 同步 |
 | `/sessions/{id}/channels/{in}_{out}` | GET/PATCH | GET=artifact 参数视图+tweaks 叠加；PATCH=M6 tweak（T2-06 §4bis，仅 ACTIVE） | read/control | 同步 |
 | `/channels` | GET/PATCH | **《T1-04》原路径兼容别名**：映射到当前唯一**持设备的 ACTIVE 会话**（backend=rfsoc）——asc 会话（device_id=None，写文件即 committed）不参与判定（tweak 本为 rfsoc 限定，T2-06 §4bis）；候选 0 个或 ≥2 个 → 409 指明改用嵌套路径 | 同上 | 同步 |
 | `/sessions/{id}/close` | POST `{release}` | M6 close（DIRTY 强制 reset 由 M6 裁决，网关只透传） | control | 同步 |
@@ -136,6 +137,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | **/channels 别名** | 0/1/2 个 ACTIVE 会话三剧本 | 唯一时等价嵌套路径；否则 409 指明嵌套路径 |
 | **SSE** | 断线重连（窗内/窗外）、心跳 | 窗内 Last-Event-ID 续传正确；窗外首事件为 `resync` 且后续事件自当前位置连续 |
 | **SCPI 黄金** | 指令表全集 + 错误队列剧本 | 响应逐字节；与 REST 同输入同 L3 结果 |
+| **产物下载** | asc 全信道 zip / `?channel` 单文件；rfsoc 帧流 / manifest；CREATED 态请求 | 内容与 M6 artifacts 逐字节一致；CREATED → 409 指明先 resolve；零设备触达 |
 | **dry-run 透传** | `apply?dry_run=true` | 同步返 manifest；传输层零调用（M6 保证的网关回归） |
 
 ---

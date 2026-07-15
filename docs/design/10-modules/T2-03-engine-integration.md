@@ -45,6 +45,12 @@ GenerateRequest = {
   scenario: "UMa"|"UMi"|"RMa"|"InH" | "CDL-A".."CDL-E" | "TDL-A".."TDL-E",
   fc_hz, bandwidth_hz,
   arrays: {tx: AntennaArray, rx: AntennaArray},      # schema 同《T1-03c》§4（序列化复用 M10）
+  geometry: {tx_pos_m: Vec3, rx_pos_m: Vec3,         # ★统计场景(UMa/UMi/RMa/InH)必填：38.901 过程需链路几何
+             los: "auto"|"force_los"|"force_nlos",   #   （d_2D/d_3D、h_BS/h_UT 由两端坐标导出；auto=按 LOS 概率
+             o2i: {model:"low"|"high",               #   模型抽样，seed 治下）；o2i=建筑穿透（38.901 §7.4.3），
+                   d2d_in_m: float} | None           #   None=室外。坐标为世界系：arrays 元素坐标是阵列局部系，
+            } | None,                                #   本字段即两端阵列参考点落位（schema 升版②前的世界系
+                                                     #   口径）；CDL-x/TDL-x 定表场景忽略本字段
   mobility: {speed_mps, direction_deg} | None,
   lsp_mode: "random" | "median",                     # median=确定性 LSP（可重复测试，引擎已支持）
   delay_spread_s: float | None,                      # ★TDL-x/CDL-x 必填：RMS 时延扩展（缩放 delay_norm，《T1-03c》§5.4）
@@ -58,9 +64,12 @@ GenerateResult = {
                                                      # phase_rad=引擎按 seed 生成的簇初相（确定性契约的一部分，
                                                      #   簇→伪径退化时作复增益辐角，M5 §3）
                                                      # 统计场景/CDL-x 返回 clusters
-  taps: [{delay_norm, power_db, doppler_spectrum}, ...] | None,
+  taps: [{delay_norm, power_db, phase_rad, doppler_spectrum}, ...] | None,
                                                      # ★TDL-x 场景返回 taps（无角度，直落 level=TDL）——
-                                                     #   clusters/taps 按场景恰返回其一
+                                                     #   clusters/taps 按场景恰返回其一；phase_rad=引擎按 seed
+                                                     #   生成的抽头初相（与簇对称，确定性契约）：canonical Tap
+                                                     #   要求复增益，仅功率无相位则 gain 未定义；TDL-D/E 首抽头
+                                                     #   Rician 的 K 与谱型由 doppler_spectrum 标注
   cir_meta: {n_snapshots, n_taps, update_rate_hz} | None,
 }
 ```
@@ -88,8 +97,8 @@ class ChannelEngineClient:
 
 def to_canonical(res, req, portmap) -> ChannelModel:
     # 统计场景(UMa/UMi/...) → level="GCM"(clusters)；CDL-x → level="CDL"(clusters)；
-    # TDL-x → level="TDL"：res.taps(delay_norm×req.delay_spread_s→delay_s, power_db→线性, 谱型→rayleigh_spec)
-    #         直落 channels[].taps
+    # TDL-x → level="TDL"：res.taps(delay_norm×req.delay_spread_s→delay_s, power_db→线性, 谱型→rayleigh_spec,
+    #         复增益 gain=sqrt(power_linear)·e^{j·phase_rad}) 直落 channels[].taps
     # clusters → Environment.links[].clusters[]（字段一一对应：delay_s/power_linear/角度[天顶]/xpr_db/k_factor）
     #   ★簇初相 phase_rad：冻结版 Cluster 无此字段（升版打包项③，T2-04 §8-5）——升版落地前由本函数
     #   把逐链路相位数组写入 provenance.import_config["cluster_phases"]（{link: [phase_rad×N簇]}，
@@ -135,7 +144,7 @@ def to_canonical(res, req, portmap) -> ChannelModel:
 
 ## 6. 错误处理
 
-- 请求校验：场景枚举、fc/带宽范围（对照引擎能力声明）、arrays 完整性——提交前在 client 侧预检，错误定位到字段。
+- 请求校验：场景枚举、fc/带宽范围（对照引擎能力声明）、arrays 完整性、统计场景 geometry 必填——提交前在 client 侧预检，错误定位到字段。
 - 任务失败：引擎异常栈摘要随 `failed` 状态返回，client 包装为 EngineError（不泄内部路径）。
 - 大结果：CIR 超 10MB 走 `cir_ref` 外置（M10 blob），JSON 结果本体保持轻量。
 

@@ -151,6 +151,10 @@ async def apply(self, plan: FramePlan) -> ApplyResult:
         state = await self._rollback()                          # 请求未被正确接收 → 按协议错误回滚
         return ApplyResult(committed=False, device_state=state, failure=at("telemetry_req", reason), ...)
     tele = await self._await_telemetry(timeout=TELEMETRY_TIMEOUT)   # 等 0xFDB18541 遥测帧
+    if tele is TIMEOUT:                                              # 遥测帧未到 → 无法核验 → 回滚
+        state = await self._rollback()
+        return ApplyResult(committed=False, device_state=state,
+                           failure=at("telemetry_wait", "timeout"), ...)
     # ★0x03 = 「单次后关闭」（《T1-A1》）——取到核验帧后必须恢复周期节奏，
     #   否则 §5 依赖的遥测活性信号熄灭。恢复帧自身也是控制帧（会产生回显），
     #   必须同样等待并核验其 echo，否则残留队列会污染下一事务的匹配：

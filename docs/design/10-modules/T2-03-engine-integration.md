@@ -67,7 +67,8 @@ class ChannelEngineClient:
         # ★portmap 与 M4 同源同格式：持久化入 provenance（M5 前置校验要求）并用于 want_cir 信道键入
         self._check_version_compat()                       # /v1/version：api_version 兼容范围校验，不符拒
         job_id = (await self._post("/v1/jobs", req, timeout=SUBMIT_TIMEOUT))["job_id"]   # ★解包，勿用整响应
-        res = await self._poll_until_done(job_id, timeout=JOB_TIMEOUT)   # 指数退避轮询
+        await self._poll_until_done(job_id, timeout=JOB_TIMEOUT)         # 指数退避轮询（仅 status）
+        res = await self._get_json(f"/v1/jobs/{job_id}/result")          # ★结果从 /result 端点取（契约分离）
         model = to_canonical(res, req, portmap)             # ↓转换规则（portmap 入 provenance）
         if req.want_cir:
             cir = await self._get_npz(f"/v1/jobs/{job_id}/cir")

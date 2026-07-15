@@ -64,7 +64,8 @@ def reduce_to_tdl(rt, portmap, cfg):
         if model.level == "RT": return link.rays
         return [PseudoRay(delay_s=c.delay_s, gain=sqrt(c.power_linear)*exp(1j*c.phase_rad),
                           angles=cluster_center_angles(c)) for c in link.clusters]
-        # 簇初相 phase_rad 来自引擎（seed 确定，T2-03 §2）；簇内角扩展本期不展开（§2 注）
+        # 簇初相 phase_rad 来自引擎（seed 确定，T2-03 §2）；★该字段属 T1-03c 升版打包项（T2-04 §8-5 ③），
+        # 升版落地前以 provenance.import_config 内的引擎结果为过渡载体；簇内角扩展本期不展开（§2 注）
 
     if portmap.link_mode == "per_element_pair":
         # RT 已逐阵元对算径（几何真值，含近场效应）——无需导向合成

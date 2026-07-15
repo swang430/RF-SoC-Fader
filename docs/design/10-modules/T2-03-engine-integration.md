@@ -38,10 +38,15 @@ GenerateRequest = {
   lsp_mode: "random" | "median",                     # median=确定性 LSP（可重复测试，引擎已支持）
   seed: int,                                         # ★确定性契约：同 seed+config → 逐比特相同结果
   want_cir: {update_rate_hz, duration_s} | None,     # 时变 CIR（A 档数据）
-}
+  client_key: str,                                   # ★客户端幂等键（UUID）：POST 超时重试时引擎按此去重——
+}                                                    #   超时可能发生在受理之后，此时 client 无 job_id 可依
 GenerateResult = {
   pathloss_db, is_los, lsps: {...},                  # 引擎 OUTPUT_FORMAT_SPEC 字段
-  clusters: [{delay_s, power_linear, aod_az/zen_deg, aoa_az/zen_deg, xpr_db, k_factor?}, ...],
+  clusters: [{delay_s, power_linear, aod_az/zen_deg, aoa_az/zen_deg, xpr_db, k_factor?}, ...] | None,
+                                                     # 统计场景/CDL-x 返回 clusters
+  taps: [{delay_norm, power_db, doppler_spectrum}, ...] | None,
+                                                     # ★TDL-x 场景返回 taps（无角度，直落 level=TDL）——
+                                                     #   clusters/taps 按场景恰返回其一
   cir_meta: {n_snapshots, n_taps, update_rate_hz} | None,
 }
 ```
@@ -66,7 +71,8 @@ class ChannelEngineClient:
         return model, report
 
 def to_canonical(res, req) -> ChannelModel:
-    # 统计场景(UMa/UMi/...) → level="GCM"；CDL-x 定表 → level="CDL"；TDL-x → level="TDL"（直落 taps）
+    # 统计场景(UMa/UMi/...) → level="GCM"(clusters)；CDL-x → level="CDL"(clusters)；
+    # TDL-x → level="TDL"：res.taps(delay_norm×DS→delay_s, power_db→线性, 谱型→rayleigh_spec) 直落 channels[].taps
     # clusters → Environment.links[].clusters[]（字段一一对应：delay_s/power_linear/角度[天顶]/xpr_db/k_factor）
     # want_cir → time.mode="time_varying" + realization="CIR"
     # meta.arrays=req.arrays（自包含）；provenance={source_type:"ChannelEgine_38901",
@@ -83,7 +89,7 @@ def to_canonical(res, req) -> ChannelModel:
 | 机制 | 规格 |
 | :-- | :-- |
 | 超时 | 提交/轮询/下载分级超时；任务级总超时 JOB_TIMEOUT（场景可配） |
-| 重试 | 提交与查询幂等（job_id 去重）；网络错误指数退避 ≤N 次 |
+| 重试 | 提交幂等靠 **client_key**（引擎按键去重返回既有 job_id，防超时重试造重复任务）；查询天然幂等；网络错误指数退避 ≤N 次 |
 | 熔断 | 连续失败 → OPEN（快速失败 M6 可见），半开探测 /healthz 恢复 |
 | 隔离 | 引擎不可达只影响统计信道生成——**不影响设备控制链路与已有模型**（错误显式上抛，不静默降级） |
 | 版本 | api_version 语义化；client 声明兼容范围，不符拒并提示升级路径 |

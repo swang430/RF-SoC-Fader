@@ -154,7 +154,9 @@ async def apply(sess, dry_run=False, auto_resolve=True) -> ApplyResult | Manifes
         return manifest_of(sess.artifacts.artifact)      # RFSoC：帧摘要/字节数；asc：文件预览
     if sess.state == CREATED and auto_resolve:            # ★复合语义归 M6：CREATED 直接 apply 时先物化再下发
         await resolve(sess)                               #   （M7 零业务逻辑；artifacts 落库与状态迁移都在
-                                                          #   resolve 本体——与单独 resolve 一致可观测）
+        sess = session_repo.get(sess.session_id)          #   resolve 本体——与单独 resolve 一致可观测）
+        # ★Session 不可变（frozen）：resolve 经 repo 产生新快照，必须重载——旧绑定仍是
+        #   CREATED 快照，artifacts=None，直接往下走会取空产物
     if sess.device_id is not None:                       # asc 无设备语义，跳过租约
         leases.try_acquire(sess.device_id, owner=sess.session_id)
         # ★非阻塞租约（§3）：他会话持有→立即 raise DeviceBusy(holder)；本会话已持有→幂等继续。

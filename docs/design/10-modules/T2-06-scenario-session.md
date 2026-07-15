@@ -54,8 +54,11 @@ class Session:
     current_op: OperationRef | None           # ★在途异步操作：submit 面受理即置位、终局清空——
                                               #   OperationInFlight 拒并发的判据；轮询方见此知「仍在跑」
     completed_ops: tuple[OpRecord, ...]       # ★终局操作历史（有界，最近 N 条；OpRecord={op_id, kind,
-                                              #   outcome, at}）：任务终局时运行器追加——客户端 wait 以
-                                              #   「op_id ∈ completed_ops」关联本操作终局并取 outcome
+                                              #   outcome, at, error?, result?}——★终局细节随记录：error=
+                                              #   该操作的结构化错误、result=其 ApplyResult 摘要。会话级
+                                              #   last_error/last_apply 会被后续操作覆盖，晚归续等只能从
+                                              #   OpRecord 取本操作的失败因/结果）：任务终局时运行器追加——
+                                              #   客户端 wait 以「op_id ∈ completed_ops」关联终局取细节
                                               #   （只存最近一条时，超时续等期间有后续操作完成会让旧 op
                                               #   永远匹配不上；re-apply 场景纯看状态会把旧 ACTIVE 误判成功）。
                                               #   N 有界防膨胀（M10 配置）；被逐出的 op 视为过期→客户端

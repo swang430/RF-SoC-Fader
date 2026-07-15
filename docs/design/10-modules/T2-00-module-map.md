@@ -17,9 +17,9 @@
 | # | 文档 | 模块 | 依赖 | 状态 |
 | :-- | :-- | :-- | :-- | :-- |
 | T2-01 | [协议编解码](T2-01-protocol-codec.md) | M1：V3.0 全 ID 编码 + 下行帧解码 + 单位换算 | 无（最底层） | ✅ 已合并（PR #7，Codex 13 条闭环） |
-| T2-02 | [设备后端/传输](T2-02-device-backends.md) | M2：DeviceBackend 抽象、RFSoC/TCP、AscCir、帧预算切分、事务 | M1 | **本 PR** |
+| T2-02 | [设备后端/传输](T2-02-device-backends.md) | M2：DeviceBackend 抽象、RFSoC/TCP、AscCir、帧预算切分、事务 | M1 | ✅ 已合并（PR #8，Codex 21 条闭环） |
 | T2-03 | 引擎集成 | M3：ChannelEngineClient 微服务契约 | schema | 待开 |
-| T2-04 | RT-MPDB 导入 | M4：mpdb_reader、量化合并、**阵列↔栅格映射(port_map)** | M1, schema | 待开 |
+| T2-04 | [RT-MPDB 导入](T2-04-mpdb-import.md) | M4：mpdb_reader、量化合并、**阵列↔栅格映射(port_map)** | M1, schema | **本 PR** |
 | T2-05 | 相关性合成 | M5：CorrelationSynthesizer（B 落地/A 预留）、退化算子 | M4 | 待开 |
 | T2-06 | 场景/会话管理 | M6：生命周期状态机、配置即数据 | M2 | 待开 |
 | T2-07 | API 网关 | M7：REST/OpenAPI、SCPI 映射 | M6 | 待开 |

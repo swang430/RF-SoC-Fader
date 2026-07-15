@@ -108,11 +108,14 @@ class ResolvedArtifacts:
 
 ```python
 async def resolve(sess) -> ResolvedArtifacts:
+    transition(sess, to=RESOLVING)       # ★状态迁移在 resolve 本体内——单独 resolve 与 apply(auto_resolve)
+                                         #   复合路径的可观测状态严格一致（CREATED→RESOLVING→READY；
+                                         #   失败由运行器落 RESOLVE_FAILED + last_error）
     scen = scenario_repo.get(sess.scenario_id, sess.scenario_version)    # 不可变读（M10）
     backend = registry.backend_of(sess)                                  # rfsoc(device) | asc
     caps = backend.capabilities
     if (hit := artifact_cache.get(scen.scenario_id, scen.version, sess.backend, digest(caps))):
-        return hit                                                       # ★幂等缓存：命中即跳 ①②④
+        transition(sess, to=READY); return hit                           # ★幂等缓存：命中即跳 ①②④
 
     # ① materialize：三源归一到 canonical model（各附报告）
     match scen.source:
@@ -138,7 +141,8 @@ async def resolve(sess) -> ResolvedArtifacts:
     artifact = backend.render(model, addr_of(sess))                                    # M2
     model_repo.put(model)                                # 内容寻址入库（provenance 链锚点，M10）
     arts = ResolvedArtifacts(model.id, artifact, hash_of(artifact), collect_reports(rep, fidelity))
-    artifact_cache.put(..., arts); return arts
+    artifact_cache.put(..., arts)
+    transition(sess, to=READY); return arts
 
 async def apply(sess, dry_run=False, auto_resolve=True) -> ApplyResult | Manifest:
     if dry_run:                          # dry-run：返回缓存 manifest——零设备触达（T1-04）、同步快返
@@ -147,7 +151,8 @@ async def apply(sess, dry_run=False, auto_resolve=True) -> ApplyResult | Manifes
                                                          #   路径：InvalidStateError(allowed_ops=[resolve])
         return manifest_of(sess.artifacts.artifact)      # RFSoC：帧摘要/字节数；asc：文件预览
     if sess.state == CREATED and auto_resolve:            # ★复合语义归 M6：CREATED 直接 apply 时先物化再下发
-        set_artifacts(sess, await resolve(sess))          #   （M7 零业务逻辑——网关不检查状态不编排，T2-07 §1）
+        set_artifacts(sess, await resolve(sess))          #   （M7 零业务逻辑；状态迁移在 resolve 本体——
+                                                          #   RESOLVING→READY 对轮询方与单独 resolve 一致可观测）
     if sess.device_id is not None:                       # asc 无设备语义，跳过租约
         leases.try_acquire(sess.device_id, owner=sess.session_id)
         # ★非阻塞租约（§3）：他会话持有→立即 raise DeviceBusy(holder)；本会话已持有→幂等继续。

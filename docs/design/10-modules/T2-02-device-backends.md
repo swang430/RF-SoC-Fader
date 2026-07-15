@@ -23,21 +23,31 @@ M2 是 **L2 设备后端层**：把 canonical model（`level=TDL`）渲染为设
 ```python
 @dataclass(frozen=True)
 class BackendCapabilities:
-    supports_time_varying: bool     # rfsoc: False（当前设备）；asc: True
-    supports_cir: bool              # rfsoc: False（《T1-12》#1）；asc: True
-    max_paths: int = 24
-    grid: str = "8x8"
-    if_freq_max_hz: float = 2.6e9   # 当前中频上限（《T1-12》N4）
-    polarization: str = "xpr_conducted"   # 传导=XPR 归约（《T1-03c》§5.3）
-    multi_frame_atomic: bool = False      # 设备无跨帧原子性（《T1-12》#5）
+    # ★无设备专属默认值——每个后端显式实例化，防止文件类后端静默继承 RF-SoC 限制
+    supports_time_varying: bool
+    supports_cir: bool
+    max_paths: int | None            # None = 无硬件上限（文件后端）
+    grid: str | None                 # None = 无栅格概念
+    if_freq_max_hz: float | None     # None = 无频段约束
+    polarization: str
+    multi_frame_atomic: bool
+
+RFSOC_CAPS = BackendCapabilities(   # 当前 RF-SoC 设备（《T1-12》#1/#5/N4）
+    supports_time_varying=False, supports_cir=False,
+    max_paths=24, grid="8x8", if_freq_max_hz=2.6e9,
+    polarization="xpr_conducted", multi_frame_atomic=False)
+ASC_CAPS = BackendCapabilities(     # .asc 文件后端：无设备物理限制
+    supports_time_varying=True, supports_cir=True,
+    max_paths=None, grid=None, if_freq_max_hz=None,
+    polarization="full", multi_frame_atomic=True)
 
 class DeviceBackend(Protocol):
     capabilities: BackendCapabilities
     def render(self, model: CanonicalChannelModel, addr: ChannelAddress|None) -> Artifact: ...
-        # 纯函数：模型→产物；不触设备（支撑 dry-run 与黄金对比）
-    def apply(self, artifact: Artifact) -> ApplyResult: ...
-        # 送达设备（事务化）或写文件
-    def readback(self) -> TelemetryFrame | None: ...   # asc: None
+        # 纯函数（同步）：模型→产物；不触设备（支撑 dry-run 与黄金对比）
+    async def apply(self, artifact: Artifact) -> ApplyResult: ...
+        # ★异步：送达设备（事务化，内部全 async TCP）或写文件；与 §4 实现签名一致
+    async def readback(self) -> TelemetryFrame | None: ...   # asc: None
 
 # 产物与结果
 @dataclass(frozen=True)
@@ -130,6 +140,9 @@ async def apply(self, plan: FramePlan) -> ApplyResult:
             return ApplyResult(committed=False, device_state=state,   # "rolled_back" | "dirty"
                                failure=at(idx, reason), ...)
     tele = await self._request_telemetry_once()                 # ID14=0x03 单次（VERIFYING 阶段独立下发，不在 G0）
+    # ★0x03 = 「单次后关闭」（《T1-A1》）——取到核验帧后必须恢复周期节奏，
+    #   否则 §5 依赖的遥测活性信号熄灭：
+    await self._tx(encode_info_return(self._telemetry_cadence)) # 恢复 0x01/0x02（配置的周期档）
     if tele.adc_overrange or tele.combiner_overflow or tele.awgn_overflow:
         state = await self._rollback()                          # 同样可能 "dirty"，不得丢弃返回值
         return ApplyResult(committed=False, device_state=state,
@@ -167,10 +180,10 @@ def render(model) -> AscFileSet:
     # 要求 model.realization=CIR 或由 static taps 采样生成；每信道对一份 .asc：
     # header: N CIRs / T Taps/CIR / update_rate / carrier_freq（《T1-08》§4.2）
     # 行: 每时刻 T 组 [delay_s, re, im]；天顶→仰角等消费者侧换算在此进行（《T1-03c》§2）
-def apply(fileset) -> ApplyResult:   # 写文件（路径策略经 M10 I/O 适配层）；committed=写盘成功
-def readback() -> None
+async def apply(fileset) -> ApplyResult:   # 写文件（路径策略经 M10 I/O 适配层）；committed=写盘成功
+async def readback() -> None
 ```
-- capabilities：`supports_time_varying=True, supports_cir=True`（A 档数据的现实出口，《T1-12》#1/#3）。
+- capabilities = `ASC_CAPS`（§2：无频段/径数/栅格约束，A 档数据的现实出口，《T1-12》#1/#3）。
 
 ---
 

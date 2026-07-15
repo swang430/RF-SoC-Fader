@@ -55,7 +55,7 @@ for ev in cep.telemetry.stream(device="dev0"):                # GET /telemetry/s
                                        # heartbeat 超时→重连。ev ∈ {snapshot, alarm, advice}（心跳/重同步被 SDK 吸收）
 ```
 
-- **`wait()` 语义（终态按操作限定，不设通则）**：轮询 `poll_url`（指数退避，尊重服务端 202 约定）；
+- **`wait()` 语义（终态按操作限定，不设通则）**：轮询 `poll_url`（指数退避，尊重服务端 202 约定）；**以 op_id 关联终局**——202 返回的 op_id 是等待锚点，`session.last_completed_op == op_id` 才算「本操作」终局（`current_op == op_id`=仍在途）：re-apply 等复用状态场景，纯看状态会把**旧 ACTIVE** 误判为新操作成功（T2-06 §2 关联字段）；
   - **resolve**：READY=成功；RESOLVE_FAILED=抛（携 `last_error`）。
   - **apply / recover**：**唯 ACTIVE=成功**——回到 READY 即 rolled_back 失败（T2-06 rolled_back→READY），抛 `ApplyRolledBackError`（携 `last_apply.failure`）；DEVICE_DIRTY 抛 `DeviceDirtyError`。判据用 `last_apply.device_state` / `last_error` 消歧——**绝不以「状态可继续」当成功**。
   - **等待超时 ≠ 任务失败**：抛 `WaitTimeout`（任务仍在服务端跑，句柄可继续 wait）。
@@ -99,7 +99,7 @@ for ev in cep.telemetry.stream(device="dev0"):                # GET /telemetry/s
 | :-- | :-- | :-- |
 | **契约（stub 服务）** | 以 T2-07 stub L3 起真 FastAPI，SDK 全资源 happy path | 请求/响应与 OpenAPI 逐字段一致 |
 | **错误映射黄金** | T2-07 §3 全部 problem fixture | 每样本恰映射一种异常、字段透传完整；未知 code→CepApiError |
-| **wait 状态机** | resolve 成功/失败；apply→ACTIVE / **apply→READY(rolled_back)** / DEVICE_DIRTY / 超时 | apply 回 READY 判失败抛 ApplyRolledBackError（**绝不误报成功**）；异常携 last_error/failure；WaitTimeout 可续等 |
+| **wait 状态机** | resolve 成功/失败；apply→ACTIVE / **apply→READY(rolled_back)** / DEVICE_DIRTY / 超时；**re-apply 于已 ACTIVE 会话** | apply 回 READY 判失败抛 ApplyRolledBackError（**绝不误报成功**）；re-apply 不因旧 ACTIVE 即刻返回（op_id 关联终局）；异常携 last_error/failure；WaitTimeout 可续等 |
 | **SSE 客户端** | 断线重连（窗内/窗外 resync）、heartbeat 丢失 | 事件序列无缝/自动补拉快照；心跳超时触发重连 |
 | **产物下载** | zip/octet 大文件流式 | 不读入内存（内存峰值断言）；长度校验 |
 | **重试纪律** | GET 网络抖动 / POST 失败 | GET 自动重试；POST 绝不自动重试 |

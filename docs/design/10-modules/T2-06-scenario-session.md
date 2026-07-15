@@ -51,6 +51,11 @@ class Session:
     state: SessionState                       # §3 状态机
     artifacts: ResolvedArtifacts | None       # resolve 产物缓存
     last_apply: ApplyResult | None            # M2 结果原样保留（含 device_state / telemetry）
+    current_op: OperationRef | None           # ★在途异步操作：submit 面受理即置位、终局清空——
+                                              #   OperationInFlight 拒并发的判据；轮询方见此知「仍在跑」
+    last_completed_op: str | None             # ★最近终局操作的 op_id：任务终局时由运行器写入——
+                                              #   客户端 wait 以「last_completed_op == 我的 op_id」关联
+                                              #   本操作终局（re-apply 场景纯看状态会把旧 ACTIVE 误判成功）
     last_error: StructuredError | None        # ★最近一次失败的结构化错误（ScenarioError/CapabilityError/
                                               #   EngineError/ImportError 原样）：异步任务失败时由运行器写入——
                                               #   RESOLVE_FAILED 时 reports/last_apply 皆空，这是轮询方唯一的
@@ -182,7 +187,9 @@ def submit_recover(sess) -> OperationRef: ...
     # 本体即上述 resolve()/apply()/recover(RESET+重 apply)；dry-run 不走提交面（无设备触达，
     #   同步 apply(dry_run=True) 直返 manifest）。OperationRef={op_id}。
     # 进度不设独立端点：Session.state 即进度（RESOLVING/APPLYING → 终点态），GET session 观察
-    #   （M7 poll_url 指向它）。同会话已有在途操作 → 立即拒 OperationInFlight（状态机禁并发的显式化）
+    #   （M7 poll_url 指向它）。受理即置 current_op；任务终局时运行器写 last_completed_op=op_id
+    #   并清 current_op——客户端以 op_id 关联「本操作」终局（§2 字段注）。
+    #   同会话已有在途操作（current_op 非空）→ 立即拒 OperationInFlight（状态机禁并发的显式化）
 ```
 
 - **幂等**（《T1-11》§1）：同 scenario@version（seed 固定）→ 同 model_id → 同 artifact_hash → 重复 apply 下发**逐字节相同**的帧序列。

@@ -21,6 +21,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 
 | 端点 | 方法 | L3 调用 | scope | 模式 |
 | :-- | :-- | :-- | :-- | :-- |
+| `/version` | GET | 网关标识 + `api_version`（SDK/第三方**版本协商面**，T2-09 §2 首调探测的即此端点）——静态元数据，零 L3 | **免鉴权**（公开探测；不泄内部拓扑） | 同步 |
 | `/devices` · `/devices/{id}` | GET | registry 列表/详情 + `readback` 健康 | read | 同步 |
 | `/devices` | POST/DELETE | ——预留 P4（《T1-10》多设备）：**501 + Problem**（feature-flag 关闭态） | control | —— |
 | `/imports` | POST | ImportJobService.submit（M4，异步 job） | write | **202** + job_id |

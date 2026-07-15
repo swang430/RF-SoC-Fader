@@ -18,7 +18,7 @@
 ## 2. 客户端形态
 
 - **async 核心 + sync 门面**：核心用 `httpx.AsyncClient` 实现全部调用；同步门面逐方法委托（事件循环内衬），**两面共用同一实现与测试**（调用图一致性有专项测试，§7）。
-- **版本协商**：首次调用惰性 GET `/v1/version`，校验 `api_version` 兼容范围（缓存）；不符抛 `VersionMismatchError`（指明升级路径——与 T2-03 client 版本纪律同款）。
+- **版本协商**：首次调用惰性 GET `/v1/version`（**网关端点，T2-07 §2 随本篇补入**——区别于 T2-03 引擎侧同名端点），校验 `api_version` 兼容范围（缓存）；不符抛 `VersionMismatchError`（指明升级路径——与 T2-03 client 版本纪律同款）。
 - **重试纪律**：仅**幂等 GET** 自动重试（指数退避 ≤N 次）；POST/PATCH **不自动重试**（服务端未定义提交幂等键——显式留给调用方，开放问题 §8-3）。429/503 的 `Retry-After` 透出到异常字段，由调用方决策。
 
 ---
@@ -55,7 +55,10 @@ for ev in cep.telemetry.stream(device="dev0"):                # GET /telemetry/s
                                        # heartbeat 超时→重连。ev ∈ {snapshot, alarm, advice}（心跳/重同步被 SDK 吸收）
 ```
 
-- **`wait()` 语义**：轮询 `poll_url`（指数退避，尊重服务端 202 约定）；终态判定按 T2-06 状态机（ACTIVE/READY=成功语境，RESOLVE_FAILED/DEVICE_DIRTY=抛异常并携 `last_error`）。**等待超时 ≠ 任务失败**：抛 `WaitTimeout`（任务仍在服务端跑，句柄可继续 wait）。
+- **`wait()` 语义（终态按操作限定，不设通则）**：轮询 `poll_url`（指数退避，尊重服务端 202 约定）；
+  - **resolve**：READY=成功；RESOLVE_FAILED=抛（携 `last_error`）。
+  - **apply / recover**：**唯 ACTIVE=成功**——回到 READY 即 rolled_back 失败（T2-06 rolled_back→READY），抛 `ApplyRolledBackError`（携 `last_apply.failure`）；DEVICE_DIRTY 抛 `DeviceDirtyError`。判据用 `last_apply.device_state` / `last_error` 消歧——**绝不以「状态可继续」当成功**。
+  - **等待超时 ≠ 任务失败**：抛 `WaitTimeout`（任务仍在服务端跑，句柄可继续 wait）。
 - **产物即文件**：`artifact()` 流式写盘 + 校验 Content-Length；不把大产物读进内存。
 
 ---
@@ -96,7 +99,7 @@ for ev in cep.telemetry.stream(device="dev0"):                # GET /telemetry/s
 | :-- | :-- | :-- |
 | **契约（stub 服务）** | 以 T2-07 stub L3 起真 FastAPI，SDK 全资源 happy path | 请求/响应与 OpenAPI 逐字段一致 |
 | **错误映射黄金** | T2-07 §3 全部 problem fixture | 每样本恰映射一种异常、字段透传完整；未知 code→CepApiError |
-| **wait 状态机** | ACTIVE / RESOLVE_FAILED / DEVICE_DIRTY / 超时四剧本 | 成功返回、类型化异常携 last_error、WaitTimeout 可续等 |
+| **wait 状态机** | resolve 成功/失败；apply→ACTIVE / **apply→READY(rolled_back)** / DEVICE_DIRTY / 超时 | apply 回 READY 判失败抛 ApplyRolledBackError（**绝不误报成功**）；异常携 last_error/failure；WaitTimeout 可续等 |
 | **SSE 客户端** | 断线重连（窗内/窗外 resync）、heartbeat 丢失 | 事件序列无缝/自动补拉快照；心跳超时触发重连 |
 | **产物下载** | zip/octet 大文件流式 | 不读入内存（内存峰值断言）；长度校验 |
 | **重试纪律** | GET 网络抖动 / POST 失败 | GET 自动重试；POST 绝不自动重试 |

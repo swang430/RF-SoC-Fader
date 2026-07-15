@@ -81,7 +81,8 @@ def to_canonical(res, req, portmap) -> ChannelModel:
     #         直落 channels[].taps
     # clusters → Environment.links[].clusters[]（字段一一对应：delay_s/power_linear/角度[天顶]/xpr_db/k_factor）
     # ★want_cir → level="TDL" + realization="CIR"：引擎 CIR 本就是逐端口对实现——
-    #   按 req.arrays.port_map 键入 channels[(in,out)].taps.gain_series/cir_ref（10MB 规则），
+    #   按 **portmap 入参**（generate 的完整校验版，勿用 req.arrays.port_map 的 int[] 投影）
+    #   键入 channels[(in,out)].taps.gain_series/cir_ref（10MB 规则），
     #   不产 environment（schema 中 environment/channels 按 level 互斥，CIR 载荷只挂 channels）；
     #   统计描述(lsps/clusters)入 provenance 供溯源
     # meta.arrays=req.arrays（自包含）；provenance={source_type:"ChannelEgine_38901",

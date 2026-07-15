@@ -62,7 +62,10 @@ def reduce_to_tdl(rt, portmap, cfg):
 
     def rays_of(link):                                            # ★层级适配：RT=真径；GCM/CDL=簇→伪径
         if model.level == "RT": return link.rays
-        return [PseudoRay(delay_s=c.delay_s, gain=sqrt(c.power_linear)*exp(1j*c.phase_rad),
+        return [PseudoRay(delay_s=c.delay_s,
+                          gain=sqrt(c.power_linear)*exp(1j*cluster_phase(model, link, k)),
+                          # cluster_phase：schema 升版后读 Cluster.phase_rad；升版前读
+                          # provenance.import_config 的引擎结果（过渡载体，两处单一实现）
                           angles=cluster_center_angles(c)) for c in link.clusters]
         # 簇初相 phase_rad 来自引擎（seed 确定，T2-03 §2）；★该字段属 T1-03c 升版打包项（T2-04 §8-5 ③），
         # 升版落地前以 provenance.import_config 内的引擎结果为过渡载体；簇内角扩展本期不展开（§2 注）

@@ -39,6 +39,9 @@ class SynthesisConfig:
     max_paths: int                      # ≤ 目标 capabilities.max_paths
     velocity_mps: Vec3 | None           # 几何多普勒（可选，《T1-05》§5）
     rayleigh: RayleighSpecConfig | None # 衰落边缘统计（可选；功率归一化 hook→M8）
+    cluster_phase_seed: int = 0         # ★簇相位兜底种子：GCM/CDL 输入既无 Cluster.phase_rad 也无
+                                        #   provenance 载体时（如用户直录 3GPP CDL 定表，表无相位列）
+                                        #   按此确定性合成（§3 cluster_phase 优先级③）
 
 @dataclass(frozen=True)
 class FidelityReport:                   # §5 数值核验产物
@@ -64,9 +67,14 @@ def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 
         if model.level == "RT": return link.rays
         return [PseudoRay(delay_s=c.delay_s,
                           gain=sqrt(c.power_linear)*exp(1j*cluster_phase(model, link, k)),
-                          # cluster_phase：schema 升版后读 Cluster.phase_rad；升版前读
-                          # provenance.import_config["cluster_phases"][link][k]
-                          # （T2-03 §3 转换时写入的过渡载体，簇序=引擎输出序；两处单一实现）
+                          # cluster_phase 取相位优先级（单一实现）：
+                          # ①Cluster.phase_rad（schema 升版后）
+                          # ②provenance.import_config["cluster_phases"][link][k]
+                          #   （T2-03 §3 转换时写入的过渡载体，簇序=引擎输出序）
+                          # ③两者皆缺（如用户直录 CDL 定表，表无相位）→
+                          #   PRNG(cfg.cluster_phase_seed) 按 (link,k) 确定性合成 U(0,2π)，
+                          #   种子记入输出 provenance 与 FidelityReport——可复现、不拒
+                          #   （任一层输入原则，T1-03b）
                           angles=cluster_center_angles(c)) for k, c in enumerate(link.clusters)]
                           # ★k 由 enumerate 绑定：簇序号即 phase_rad 的索引键（引擎按簇序输出）
         # 簇初相 phase_rad 来自引擎（seed 确定，T2-03 §2）；★该字段属 T1-03c 升版打包项（T2-04 §8-5 ③），

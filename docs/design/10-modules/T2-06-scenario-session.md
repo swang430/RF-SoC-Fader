@@ -87,7 +87,7 @@ class ResolvedArtifacts:
 | RESOLVING | 编排管线运行中（§4；长耗时异步 job，《T1-04》） | 查询进度 / cancel |
 | READY | 产物就绪（FramePlan/AscFileSet + 报告），设备零触达 | dry_run / apply / close |
 | APPLYING | M2 事务进行中 | 查询进度（同会话禁止并发第二个 apply） |
-| ACTIVE | committed——设备射频输出已按该产物生效 | readback / re-apply / close |
+| ACTIVE | committed——设备射频输出已按该产物生效 | readback / tweak（§4bis）/ re-apply / close |
 | DEVICE_DIRTY | M2 返回 dirty：设备状态未知（T2-02 §契约） | recover / close(reset) |
 | RESOLVE_FAILED · CLOSED | 终态（CLOSED 释放设备租约） | —— |
 
@@ -148,6 +148,15 @@ async def apply(sess, dry_run=False, auto_resolve=True) -> ApplyResult | Manifes
     audit_end(sess, result)
     transition(sess, by=result.device_state)             # committed→ACTIVE / rolled_back→READY
     return result                                        #   / dirty→DEVICE_DIRTY
+
+# ★异步提交面（供 M7 的 202 语义）：长耗时操作由 M6 任务运行器承载——网关不持协程、不追踪任务
+def submit_resolve(sess) -> OperationRef: ...
+def submit_apply(sess, auto_resolve=True) -> OperationRef: ...
+def submit_recover(sess) -> OperationRef: ...
+    # 本体即上述 resolve()/apply()/recover(RESET+重 apply)；dry-run 不走提交面（无设备触达，
+    #   同步 apply(dry_run=True) 直返 manifest）。OperationRef={op_id}。
+    # 进度不设独立端点：Session.state 即进度（RESOLVING/APPLYING → 终点态），GET session 观察
+    #   （M7 poll_url 指向它）。同会话已有在途操作 → 立即拒 OperationInFlight（状态机禁并发的显式化）
 ```
 
 - **幂等**（《T1-11》§1）：同 scenario@version（seed 固定）→ 同 model_id → 同 artifact_hash → 重复 apply 下发**逐字节相同**的帧序列。

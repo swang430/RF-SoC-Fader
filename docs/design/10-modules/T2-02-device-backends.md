@@ -194,8 +194,10 @@ class TcpTransport:
     async def send(data: bytes)
     # 接收循环：chunk → M1 DownlinkParser.feed() → 按帧型分发：
     #   CopyEcho → apply 的等待队列；
-    #   Telemetry → ★若 apply 正在 VERIFYING 等待（_await_telemetry 挂起）→ 优先交付 apply 等待队列，
-    #               同时/其余情况回调 M8（遥测循环）——两个消费者，不得只路由 M8（§4 依赖）；
+    #   Telemetry → ★捕获窗口+缓冲：apply 发出 0x03 请求即开启遥测捕获窗（不等 _await_telemetry 挂起）——
+    #               窗内到达的遥测帧**入缓冲队列**（遥测可能先于请求回显到达，时序无保证）；
+    #               _await_telemetry 从队列消费（已有则立即返回，无则等待）；窗外遥测回调 M8。
+    #               不得用「挂起才交付」判定，否则早到帧只进 M8、核验伪超时（★P1 竞态）；
     #   Error → 当前事务失败信号；SerialPassthrough → 透传回调
 ```
 

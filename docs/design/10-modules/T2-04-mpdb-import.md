@@ -37,6 +37,7 @@ def load(path: str) -> RawRtTable:
 ```
 
 - **schema 校验**：缺列/空表/维度不符 → `ValueError`（列名与期望型别入错误信息）。
+- **外键完整性**：`CHANNEL.LINK_ID ⊆ LINK` 主键集——孤儿径（引用不存在 LINK 的行）**默认报错**；宽松模式（可配）下丢弃并计入 ImportReport，**不得静默**（按链路迭代建模会无声吞掉孤儿径）。
 - **不做任何单位换算**：DELAY 保持秒、角度保持度·天顶角——与 canonical 约定一致（《T1-03c》§2），**导入是"结构搬运"**；仰角换算只发生在需要它的消费者（.asc 导出）。
 
 ---
@@ -64,7 +65,7 @@ class PortMap:
 | **single_reference** | 单 LINK（单参考天线对）+ 用户提供阵列几何 | M5 用导向矢量**合成**各阵元对信道（《T1-06》B 方案 Phase 2），再映射 |
 
 - 模式由 **PortMap.link_mode 单一来源**声明（不在 ImportConfig 重复，防双源漂移）+ 对 LINK 表做**分模式核验**（不猜）：
-  - **阵元身份解析先行**：MPDB 的 `TX/RX` 可能是收发**设备端点号**而非阵元号，逐天线身份由 `TX/RX_ANT_POSITION` 承载（《MPDB接口的使用》）。核验前先按 `identity_by: "index" | "position"` 解析 LINK↔阵元对应——`position` 模式以坐标对 `arrays.positions_m` 容差匹配（ε 可配），一对一匹配失败即报错；
+  - **阵元身份解析先行**：MPDB 的 `TX/RX` 可能是收发**设备端点号**而非阵元号，逐天线身份由 `TX/RX_ANT_POSITION` 承载（《MPDB接口的使用》）。核验前先按 `identity_by: "index" | "position"` 解析 LINK↔阵元对应——`position` 模式以坐标对 `arrays.positions_m` 容差匹配（ε 可配），一对一匹配失败即报错。**坐标系框架前提**：MPDB 位置为世界系，而 schema 允许 `positions_m` 为本地系（《T1-03c》§4）——匹配前须统一到世界系：本地系阵列先经 `origin+orientation` 变换（变换参数缺失且非世界系 → 报错，不得直接匹配）；
   - `per_element_pair`：解析后校验**阵元对集合 == tx_elements × rx_elements**（笛卡尔积集合相等，**非仅数量**——数量相等仍可能重复+缺失并存，静默污染 MIMO 矩阵）；报错列出**重复项与缺失项**明细；
   - `single_reference`：`len(links)==1` **且**该 LINK 的 TX/RX 索引为有效参考点（在提供的 arrays 元素域内）——只查数量会放过端点悬空的库；
   - 均不符→明确报错并提示两种合法形态。

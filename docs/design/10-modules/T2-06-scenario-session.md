@@ -134,10 +134,13 @@ async def resolve(sess) -> ResolvedArtifacts:
     artifact_cache.put(..., arts); return arts
 
 async def apply(sess, dry_run=False, auto_resolve=True) -> ApplyResult | Manifest:
+    if dry_run:                          # dry-run：返回缓存 manifest——零设备触达（T1-04）、同步快返
+        require_state(sess, {READY, ACTIVE})             # ★仅产物已缓存态；CREATED 不隐式 resolve——
+                                                         #   物化是长耗时（引擎可达分钟级），不得混入同步
+                                                         #   路径：InvalidStateError(allowed_ops=[resolve])
+        return manifest_of(sess.artifacts.artifact)      # RFSoC：帧摘要/字节数；asc：文件预览
     if sess.state == CREATED and auto_resolve:            # ★复合语义归 M6：CREATED 直接 apply 时先物化再下发
         set_artifacts(sess, await resolve(sess))          #   （M7 零业务逻辑——网关不检查状态不编排，T2-07 §1）
-    if dry_run:                          # dry-run：返回 READY 缓存的 manifest——零设备触达（T1-04）
-        return manifest_of(sess.artifacts.artifact)      # RFSoC：帧摘要/字节数；asc：文件预览
     if sess.device_id is not None:                       # asc 无设备语义，跳过租约
         leases.try_acquire(sess.device_id, owner=sess.session_id)
         # ★非阻塞租约（§3）：他会话持有→立即 raise DeviceBusy(holder)；本会话已持有→幂等继续。

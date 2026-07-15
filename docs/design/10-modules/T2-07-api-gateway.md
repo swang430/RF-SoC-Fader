@@ -31,9 +31,9 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `/sessions` | POST `{scenario_id, version, device_id?, backend}` | M6 create（锁定版本） | control | 同步 |
 | `/sessions/{id}` | GET | 状态机态 + reports + last_apply + tweaks | read | 轮询 |
 | `/sessions/{id}/resolve` | POST | M6 `submit_resolve`（任务在 M6 运行器内，网关不持协程，T2-06 §4 提交面） | control | **202** |
-| `/sessions/{id}/apply` | POST `?dry_run=` | M6 `submit_apply(auto_resolve=True)`——CREATED 态由 **M6 内部**先 resolve 再 apply；dry_run=true 走同步 `apply(dry_run=True)` 直返 manifest。网关不检查状态、不编排、不持协程（单次 L3 调用） | control | 202（dry_run 同步返 manifest） |
+| `/sessions/{id}/apply` | POST `?dry_run=` | M6 `submit_apply(auto_resolve=True)`——CREATED 态由 **M6 内部**先 resolve 再 apply；dry_run=true 走同步 `apply(dry_run=True)` 直返 manifest（**仅 READY/ACTIVE**：CREATED 时 M6 抛 InvalidState → 409 指明先 resolve——物化长耗时不得混入同步路径）。网关不检查状态、不编排、不持协程（单次 L3 调用） | control | 202（dry_run 同步返 manifest） |
 | `/sessions/{id}/channels/{in}_{out}` | GET/PATCH | GET=artifact 参数视图+tweaks 叠加；PATCH=M6 tweak（T2-06 §4bis，仅 ACTIVE） | read/control | 同步 |
-| `/channels` | GET/PATCH | **《T1-04》原路径兼容别名**：映射到当前唯一 ACTIVE 会话；0 个或 ≥2 个 ACTIVE → 409 指明改用嵌套路径 | 同上 | 同步 |
+| `/channels` | GET/PATCH | **《T1-04》原路径兼容别名**：映射到当前唯一**持设备的 ACTIVE 会话**（backend=rfsoc）——asc 会话（device_id=None，写文件即 committed）不参与判定（tweak 本为 rfsoc 限定，T2-06 §4bis）；候选 0 个或 ≥2 个 → 409 指明改用嵌套路径 | 同上 | 同步 |
 | `/sessions/{id}/close` | POST `{release}` | M6 close（DIRTY 强制 reset 由 M6 裁决，网关只透传） | control | 同步 |
 | `/sessions/{id}/recover` | POST | M6 `submit_recover`（RESET+重 apply，任务在 M6 运行器内） | control | 202 |
 | `/telemetry` | GET | M8 快照服务 | read | 同步 |
@@ -69,7 +69,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 - **认证**：API-Key（第三方，Header）＋短时会话令牌（GUI）。本地部署默认静态密钥表（M10 配置承载）；OIDC/IdP 为可插拔后续项（商用部署）。
 - **鉴权三档 scope**（递进包含）：
   `read`（遥测/场景/模型/会话状态 GET）⊂ `write`（imports/scenarios 写）⊂ `control`（sessions 的 apply/tweak/close/recover 及一切**触达设备**操作）。
-- **审计中间件**：control 域每次调用（**含失败与被拒**）→ `AuditRecord{key_id, when, op, session_id, manifest_digest, outcome}` → M10 append-only。与 M6 会话内审计**互补不重复**：网关记「谁经哪个门做了什么请求」，M6 记「设备上实际发生了什么」。
+- **审计中间件**：control 域每次调用（**含失败与被拒**）→ `AuditRecord{key_id, when, op, session_id, manifest_digest, outcome}` → M10 append-only。**同步操作记终局 outcome；异步提交记「受理」（含 op_id）**——终局结果由 M6 任务运行器在任务完成时写入会话审计（T2-06），网关**不依赖后续轮询闭合审计**；GET 类请求纯读、零审计写。与 M6 会话内审计**互补不重复**：网关记「谁经哪个门做了什么请求」，M6 记「设备上实际发生了什么」。
 - **限流**：per-key 令牌桶（read/write/control 分桶）；apply 类在 M6 设备租约处天然串行——网关**不做隐式排队**（同 M6 语义），队列深度超限直接 429。
 
 ---
@@ -105,10 +105,11 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
   │  202 {op_id,   │◄─ OperationRef ─────────────────────│  CREATED?→先 resolve 再 apply → M2 事务
   │    poll_url}   │                                     │
   │◄───────────────│                                     │
-  │ GET /sessions/{id}（轮询）                        │
+  │ GET /sessions/{id}（轮询——纯读，零审计写）         │
   │──────────────►│── get() ────────────────────────►│
   │  ACTIVE + 报告 │◄─────────────────────────────────│
-  │◄───────────────│ 审计(end, outcome)
+  │◄───────────────│ ※异步操作终局审计＝M6 运行器在任务完成时写会话审计；
+  │                │   网关审计只记「受理 + op_id」（不依赖轮询闭合）
   │
   │ GET /telemetry/stream (SSE, Last-Event-ID?)
   │──────────────►│── subscribe(device, last_id) ──────────────────────►│
@@ -127,7 +128,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | **契约（stub L3）** | 全端点 happy + 全错误分类 | 状态码与 problem+json 逐字段正确 |
 | **OpenAPI 黄金** | `openapi.json` diff | 破坏性变更被 CI 拦截 |
 | **鉴权矩阵** | 3 scope × 全端点（含 SSE、SCPI） | 401/403 无遗漏、错误含所需 scope |
-| **审计完备** | control 域全操作 × 成功/失败/被拒 | 每次调用恰一条 AuditRecord |
+| **审计完备** | control 域全操作 × 成功/失败/被拒；异步含「提交后不轮询」剧本 | 同步=恰一条含 outcome；异步=网关受理记录 + M6 会话终局审计各恰一条（无轮询也闭合）；GET 零审计写 |
 | **限流** | 突发+持续超额 | 429 + Retry-After；不影响其他 key |
 | **复合 apply 透传** | CREATED 态直接 apply | 网关仅发**一次** L3 调用 `submit_apply(auto_resolve=True)` 即返 202；状态检查与任务承载均在 M6（stub 断言零状态读取、网关无协程持有） |
 | **/channels 别名** | 0/1/2 个 ACTIVE 会话三剧本 | 唯一时等价嵌套路径；否则 409 指明嵌套路径 |

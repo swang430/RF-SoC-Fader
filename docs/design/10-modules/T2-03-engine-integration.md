@@ -110,7 +110,10 @@ def to_canonical(res, req, portmap) -> ChannelModel:
     #   键入 channels[(in,out)].taps.gain_series/cir_ref（10MB 规则），
     #   不产 environment（schema 中 environment/channels 按 level 互斥，CIR 载荷只挂 channels）；
     #   统计描述(lsps/clusters)入 provenance 供溯源
-    # meta.arrays=req.arrays（自包含）；provenance={source_type:"ChannelEgine_38901",
+    # meta.arrays=req.arrays（自包含）——★v1.1 落库标注（新数据直写，迁移钩子只服务 v1.0 旧库存）：
+    #   arrays.frame=local（引擎元素坐标即阵列局部系，§2）；统计场景以 geometry.tx/rx_pos_m 填
+    #   各端 origin_m，CDL-x/TDL-x 无 geometry → origin_m 缺省（无世界锚定，T1-03c §4）
+    # provenance={source_type:"ChannelEgine_38901",
     #   source_ref:f"{engine_version}",
     #   import_config:{**req 剔除 client_key, "portmap": serialize(portmap)}}
     #   ——★client_key 是传输层幂等键（逐次提交新 UUID），不属物理配置：若入 provenance，

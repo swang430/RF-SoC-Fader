@@ -2,8 +2,8 @@
 
 > 第二册《功能设计》· 第 9 篇（L5 客户端：`cep_sdk`——REST 的 Python 封装）
 > 状态：草稿 v0.1 · 待评审
-> 依据：《T1-04 §4 Python SDK》（冻结基线：封装 REST、语义与 REST 一一对应、GUI 与第三方统一入口）
-> 消费方：M11 GUI、第三方脚本、CI、演进后的 CLI；依赖：M7（REST/OpenAPI 契约——SDK 的唯一上游，**不直连 L3**）
+> 依据：《T1-04 §4 Python SDK》（冻结基线：封装 REST、语义与 REST 一一对应；「GUI 与第三方统一入口」的兑现面=同一 REST 合同+三前端一致性测试——Web GUI 为浏览器形态、运行时直连 REST 不经 SDK，T2-11 §2/《T1-14》§2 允许「SDK / REST」二择）
+> 消费方：第三方脚本、CI、演进后的 CLI；M11 GUI 为**语义对照方**（非运行时消费——GUI/SDK 调用序等价测试的另一端）；依赖：M7（REST/OpenAPI 契约——SDK 的唯一上游，**不直连 L3**）
 
 ---
 

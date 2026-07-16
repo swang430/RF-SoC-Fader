@@ -82,7 +82,7 @@
 
 ### 5-B 集成/系统义务（→ T3-02）
 
-假设备六剧本（正常/篡改 1 字节/超时/错误帧/中途断连/遥测溢出位）及其扩展（§5-E）；假引擎全端点 + 熔断/恢复/版本协商；三源编排全桩（调用序①materialize→②reduce→③能力门→④render）；状态机全矩阵（含全部非法迁移与 close 可达性）；双会话设备互斥（非阻塞 DeviceBusy）；重启恢复（ACTIVE→DEVICE_DIRTY、孤儿 op aborted_by_restart）；tweak 三剧本分流；审计完备矩阵（五类判据）；鉴权矩阵（3 scope×全端点）；SSE 断线续传/resync；三前端一致性（REST vs SCPI 同 L3 调用序录制断言）；隔离性（引擎宕机不影响设备链路）；依赖隔离（主进程无 torch）。
+假设备六剧本（正常/篡改 1 字节/超时/错误帧/中途断连/遥测溢出位）及其扩展（§5-E）；假引擎全端点 + 熔断/恢复/版本协商；三源编排全桩（调用序①materialize→②reduce→③能力门→④render）；状态机全矩阵（含全部非法迁移与 close 可达性）；双会话设备互斥（非阻塞 DeviceBusy）；重启恢复（ACTIVE→DEVICE_DIRTY、孤儿 op aborted_by_restart）；tweak 三剧本分流；审计完备矩阵（五类判据）；鉴权矩阵（3 scope×全端点）；SSE 断线续传/resync；三前端一致性**两个面**（REST vs SCPI 同 L3 调用序录制断言，T2-07 §7/§10；GUI vs SDK 同语义操作的 HTTP 调用序逐调用等价，T2-11 §6——GUI 不经 SDK、M9 为语义对照物）；隔离性（引擎宕机不影响设备链路）；依赖隔离（主进程无 torch）。
 
 ### 5-C HIL 义务（→ T3-03，详见 §6）
 

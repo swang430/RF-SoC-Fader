@@ -103,7 +103,10 @@ def import_mpdb(source, arrays: {tx: AntennaArray, rx: AntennaArray},
     raw = mpdb_reader.load(source)                       # §2
     resolution = validate_link_table(raw.links, portmap.link_mode, arrays,  # §3.1 分模式核验（端点集合/单链路）
                         identity_by=cfg.identity_by,            # 身份解析策略与容差随调用显式传入
-                        epsilon_m=cfg.position_epsilon_m, frame=cfg.frame)  # frame 声明随调用传入（§3.1 世界系前提）
+                        epsilon_m=cfg.position_epsilon_m, frame=cfg.frame)
+    # ★cfg.frame ∈ {"world","local"}（v1.1）——分模式校验：identity_by="position" 仅接受 world
+    #   （坐标匹配需世界系，§3.1）；identity_by="index" 两值皆可（local=局部几何标注、无锚定语义，
+    #   落库仅印 arrays.frame 不做变换——身份解析不依赖坐标）。声明同时入 provenance（迁移判定依据）
     # resolution: link_id → (tx_elem, rx_elem)。★解析结果必须回填模型（见下 Link 构造）——
     # position 模式下原始 TX/RX 是设备端点号，若原样入模型，M5 按阵元号消费会错位
     validate_portmap(portmap, ValidationContext(                # §3.2 V1–V7：上下文完整传入——

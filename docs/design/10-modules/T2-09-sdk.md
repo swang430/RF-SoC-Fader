@@ -57,10 +57,11 @@ for ev in cep.telemetry.stream(device="dev0"):                # GET /telemetry/s
 
 - **`wait()` 语义（终态按操作限定，不设通则）**：轮询 `poll_url`（指数退避，尊重服务端 202 约定）；**以 op_id 关联终局**——202 返回的 op_id 是等待锚点，`op_id ∈ session.completed_ops`（有界历史）才算「本操作」终局，outcome **及失败细节（OpRecord.error/result）**都从对应记录取——会话级 last_error/last_apply 可能已被后续操作覆盖（`current_op == op_id`=仍在途）：re-apply 等复用状态场景，纯看状态会把**旧 ACTIVE** 误判为新操作成功；续等跨越后续操作也能命中历史，被逐出（超 N 条）→ 抛 `StaleWait`（指引查会话审计，T2-06 §2）；
   - **resolve**：终局判据=本 op 的 `OpRecord.outcome`（失败细节=OpRecord.error）；会话态 READY/RESOLVE_FAILED 仅辅助展示。
-  - **apply / recover**：终局判据=本 op 的 `OpRecord.result.device_state`——committed=成功；rolled_back=抛 `ApplyRolledBackError`（携 OpRecord.result.failure）；dirty=抛 `DeviceDirtyError`；outcome=aborted_by_restart=抛 `OperationAborted`（服务端重启中止，T2-06 §3）。**绝不以「状态可继续/ACTIVE」当成功，绝不读会话级 last_apply/last_error 判本 op**（可能已被后续操作覆盖——op_id 关联的意义所在）。
+  - **apply / recover**：**先判 `OpRecord.outcome`**（全集见 T2-06 §2 词表）——`rejected` 抛 `OperationRejectedError`（携 error=audit_unavailable，设备零触达，T2-10 §6）；`aborted_by_restart` 抛 `OperationAborted`（服务端重启中止，T2-06 §3）；`failed` 抛 `CepApiError` 携 OpRecord.error；`completed` 才读 `result.device_state`——committed=成功；rolled_back=抛 `ApplyRolledBackError`（携 OpRecord.result.failure）；dirty=抛 `DeviceDirtyError`。**绝不以「状态可继续/ACTIVE」当成功，绝不读会话级 last_apply/last_error 判本 op**（可能已被后续操作覆盖——op_id 关联的意义所在）。
   - **导入 job（另一族，无 op_id）**：`job.wait()` 轮询 GET `/imports/{job_id}`，以 job 自身 `status` 终态判定——done=成功返 model 句柄、failed=抛 `ImportFailedError`（携源错误摘要）。job 一次性、状态不复用，**无需也无从 op_id 关联**（202 响应本就只有 `{job_id, poll_url}`，T2-07 §2）。
   - **等待超时 ≠ 任务失败**：抛 `WaitTimeout`（任务仍在服务端跑，句柄可继续 wait）——两族通用。
 - **产物即文件**：`artifact()` 流式写盘 + 校验 Content-Length；不把大产物读进内存。
+- **资源面补全（「REST 有则 SDK 有」的兜底清单，《T1-15》Q5）**：除上述主线外，§2 端点表的其余行同样一一封装——`cep.imports.validate(portmap, ctx)`（同步预检）、`cep.imports.create_cdl_tdl_table(table, delay_spread_s, …)`（定表直录）、`cep.models.get(id)/view(id)`、`cep.blobs.open(ref)`（流式）、`cep.scenarios.list(query)/scen.versions()`、`cep.devices.list()`；OpenAPI 黄金 diff 的覆盖断言=**全端点面**（不是已封装子集），缺封装即 diff 红。
 
 ---
 
@@ -72,6 +73,7 @@ for ev in cep.telemetry.stream(device="dev0"):                # GET /telemetry/s
 | 409 DeviceBusy | `DeviceBusyError` | holder_session_id |
 | 409 非法迁移/InvalidClose/版本冲突 | `InvalidStateError` / `VersionConflictError` | allowed_ops / current_version |
 | 409 device_state=dirty | `DeviceDirtyError` | detail 指明 recover |
+| 409 OperationInFlight | `OperationInFlightError` | 携 current_op={op_id, kind}——可直接对该 op 续 wait（T2-07 §3 同源行） |
 | 404 | `NotFoundError` | —— |
 | 401/403 | `AuthError` | 所需 scope |
 | 429 / 503 | `RateLimitedError` / `ServiceUnavailableError` | retry_after |
@@ -115,6 +117,7 @@ for ev in cep.telemetry.stream(device="dev0"):                # GET /telemetry/s
 2. 报告（Import/Engine/Fidelity/Quant）的 numpy/pandas 便捷视图范围（extras 边界）。
 3. POST 提交幂等键（REST 层扩展 `Idempotency-Key`）→ 允许 SDK 安全自动重试提交类操作——与 M7/M6 协同（T2-03 client_key 同思路），P2 复评。
 4. SDK 发布渠道与内部索引（商用部署项）。
+5. **B+ 播放面（保留，《T1-15》§7）**：`cep.sessions.playback_*` 随 M7 `/sessions/{id}/playback` 端点与 capabilities 启用——落地前不提供（REST 无则 SDK 无，无私有旁路原则不受影响）。
 
 ---
 

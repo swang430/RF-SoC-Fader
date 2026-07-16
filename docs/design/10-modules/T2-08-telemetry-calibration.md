@@ -123,16 +123,20 @@ def overflow_guard(snap: TelemetrySnapshot) -> list[Advice]:
 
 ---
 
-## 4. 接口汇总（对 M7 的规范）
+## 4. 接口汇总（按消费方分组）
 
 ```python
+# —— 对 M7（REST 暴露面，T2-07 §2 声明消费的仅此两个）——
 TelemetryService.get_snapshot(device_id) -> TelemetrySnapshot | None
 TelemetryService.subscribe(device_id, last_event_id=None) -> AsyncIterator[TelemetryEvent]
+# —— 对 M5/M6/M10（进程内纯函数与配置产出，无对应 REST 端点）——
 CalibrationService.rayleigh_norm_gain(taps_coeffs, mode="per_tap") -> tuple[float, ...]
 CalibrationService.bypass_atten_db(mode) -> float            # UncalibratedError 语义
 CalibrationService.input_level_advice(papr_db=...) -> LevelAdvice
 CalibrationService.overflow_guard(snapshot) -> list[Advice]
 ```
+
+> `input_level_advice` 本期仅经 M10 配置转化为告警阈值与 GUI 提示文案（《T1-12》N1），无直接 REST 用户面；若需只读端点随 S1 回路向 M7 回馈。
 
 ---
 
@@ -152,7 +156,7 @@ CalibrationService.overflow_guard(snapshot) -> list[Advice]
 | 未标定 bypass 表访问 | `UncalibratedError`（显式上抛；错误指明待硬件数值项 N2） |
 | 订阅者慢消费 | 丢最旧 + 补 `resync`（采集路径永不被下游阻塞） |
 | 设备静默 | `device_silent` 告警（活性）；`get_snapshot` 返回最近帧+陈旧时长标注 |
-| 无任何遥测数据 | `get_snapshot` 返 None（区分「无数据」与「设备错误」，M7 表达 204/404 语义） |
+| 无任何遥测数据 | `get_snapshot` 返 None（区分「无数据」与「设备错误」）——HTTP 语义已由 T2-07 §2 裁决：已注册无数据→204、未注册→404 |
 
 ---
 

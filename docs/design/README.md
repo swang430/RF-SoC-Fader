@@ -27,7 +27,7 @@
 | T1-12 | [风险与待确认清单](00-overall/T1-12-risks-open-items.md) | ★ 待硬件确认项 Q1–Q6 |
 | T1-13 | [路线图](00-overall/T1-13-roadmap.md) | P0–P4 阶段与关键路径 |
 | T1-14 | [GUI 顶层概念设计](00-overall/T1-14-gui-concept.md) | 五主视图、三设计立场、技术形态已定 Web |
-| T1-15 | [设计问答：时变 TDL 与 API/SDK 定位](00-overall/T1-15-qa-time-varying-tdl-and-api.md) | 相位连续性/生灭/轨迹裁定（D1–D6）、M4 合并策略澄清、API/SDK 定位 |
+| T1-15 | [设计问答：时变 TDL 与 API/SDK 定位](00-overall/T1-15-qa-time-varying-tdl-and-api.md) | 相位连续性/生灭/轨迹/B+ 连续播放裁定（D1–D8）、M4 合并策略澄清、API/SDK 定位 |
 
 ### 附录（参考性）
 

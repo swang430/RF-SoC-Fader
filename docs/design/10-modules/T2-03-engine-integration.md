@@ -152,7 +152,7 @@ def to_canonical(res, req, portmap) -> ChannelModel:
 
 ## 6. 错误处理
 
-- 请求校验：场景枚举、fc/带宽范围（对照引擎能力声明）、arrays 完整性、**arrays.\*.frame=="local"**（v1.1——world 拒并提示世界落位走 geometry）、统计场景 geometry 必填——提交前在 client 侧预检，错误定位到字段。
+- 请求校验：场景枚举、fc/带宽范围（对照引擎能力声明）、arrays 完整性、**arrays.\*.frame=="local"**（v1.1——world 拒并提示世界落位走 geometry）、统计场景 geometry 必填、**want_cir 采样充分性**（`update_rate_hz ≥ 2·f_d_max`，`f_d_max = mobility.speed_mps·fc/c`；`mobility=None` 时跳过——防快照间相位卷绕假频，违反拒并提示；《T1-15》D1 契约收紧）——提交前在 client 侧预检，错误定位到字段。
 - 任务失败：引擎异常栈摘要随 `failed` 状态返回，client 包装为 EngineError（不泄内部路径）。
 - 大结果：CIR 超 10MB 走 `cir_ref` 外置（M10 blob），JSON 结果本体保持轻量。
 
@@ -175,7 +175,7 @@ def to_canonical(res, req, portmap) -> ChannelModel:
 ## 8. 开放问题
 1. 引擎能力声明端点（支持的场景/频率范围/最大阵列）——首版硬编码在 client 预检，后续引擎提供 `/v1/capabilities`。
 2. NPZ vs Arrow（大张量格式）——首版 NPZ（numpy 原生零依赖）；与 M10 blob 格式统一时复评。
-3. 任务并发/队列深度（引擎侧资源管理）——引擎服务层实现项。
+3. 任务并发/队列深度与**任务取消**（引擎侧资源管理）——引擎服务层实现项；client 取消语义联动 T2-06 §6「RESOLVING cancel」（首版：client 放弃轮询、引擎任务自然过期并按队列策略回收资源；`DELETE /v1/jobs/{id}` 为服务层端点候选，纳入 v1 契约时同步补 §2 端点表）。
 4. ChannelEgine 服务层的仓库 PR 计划与版本发布节奏（跨仓协调）。
 
 ## 9. 本篇验收

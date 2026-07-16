@@ -29,7 +29,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `/imports/{job}` | GET | job 状态/结果（成功=model_id 句柄） | read | 轮询 |
 | `/models/{id}` | GET | model_repo 元数据 + 报告（**不回吐张量**；imports 句柄的解引用面——《T1-04》隐含） | read | 同步 |
 | `/models/{id}/view` | GET | **渲染投影**（`viz-json/v1`——服务端由 canonical model 投影出的渲染数据集：PDP 序列、角度散点、R 矩阵、栅格占用、taps 概要、CIR 引用；可视化台取数面，T2-11 ③/S2）。**canonical 本体不直出**——《T1-04》§7 冻结口径「canonical model 是内部契约，不直接暴露给 API 版本」：投影 schema 随 /v1 合同演进，canonical 变更由投影层吸收；投影是 REST 响应 shape（OpenAPI 内），非持久化格式、不入 M10 注册表 | read | 同步 |
-| `/auth/me` | GET | 当前凭据自述 `{key_id, scope, expires}`——**HttpOnly Cookie 下前端无法解析令牌**，菜单/按钮 scope 门控的自举面（T2-11 §2） | 任一已认证 | 同步 |
+| `/auth/me` | GET | 当前凭据自述 `{key_id, scope, expires, csrf_token}`——**HttpOnly Cookie 下前端无法解析令牌**，scope 门控与 CSRF 双提交 token（§4）的共同自举面（T2-11 §2）；`csrf_token` 仅 Cookie 会话下发（API-Key 调用无 CSRF 面，字段缺省） | 任一已认证 | 同步 |
 | `/blobs/{ref}` | GET | 内容寻址 blob **只读流式**下载（CIR 播放预览、超限系数等引用取数面；经 M10 open_stream 直出不进内存） | read | 同步 |
 | `/scenarios` | GET `?query=&tag=&level=` /POST | scenario_repo 列表/创建（version=1）。检索参数：`query`=名称模糊、`tag`=标签（T2-06 §2 Scenario.tags）、`level`=**服务端由 source 推导**（Mpdb→RT；Engine→按场景枚举映射 UMa/UMi/RMa/InH→GCM、CDL-x→CDL、TDL-x→TDL，**且 want_cir 置位时一律 TDL+CIR 徽标**——T2-03 §3 转换即 level=TDL/realization=CIR；ModelRef→模型元数据 level）——列表响应含该推导字段（①视图徽标数据源，GUI 不自行推导） | read/write | 同步 |
 | `/scenarios/{id}/versions` | GET | **版本历史列表**（version / created_at / created_by / 变更摘要——①视图版本树数据源；`?version=` 单版读取仍走 `/scenarios/{id}`） | read | 同步 |

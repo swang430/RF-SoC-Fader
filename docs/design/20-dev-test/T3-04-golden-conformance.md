@@ -29,13 +29,13 @@
 | G1 | `frames/` | 35 ID 各≥1 条控制帧 hex（含 ID6 长度字段 0 特例、io/info 组合例） | 协议 V3.0 docx 示例与字段规格（如 `0x0300`=25ns） | 按 docx **手工构造** hex；docx 无现成示例的 ID 按规格文本推导并在 provenance 标注「推导，待 HIL 对表」（§4-1） | 逐字节相等 | C-M1 段 |
 | G2 | `telemetry/` | 131B 遥测帧样本（含 ADC 过载/输出溢出位）、复制回显帧、7B 错误帧、0x50 透传帧 | docx 下行帧布局表（《T1-A1》§5） | 手工构造 + 位图逐位注释 | 解码字段逐一相等 | C-M1/C-M8 段 |
 | G3 | `asc/` | 黄金 `.asc` 文件集（含头四行与逐时刻抽头行、天顶→仰角换算例） | ChannelEgine 输出样例（登记样例的引擎版本与生成参数） | 从引擎样例**复制**入库（不改一字）；配套登记生成参数供重录 | 逐行文本相等（浮点按打印格式） | C-M2 段、I-ORCH-011 |
-| G4 | `tables/` | CDL-A/TDL-A（首批）定表 JSON 与期望 clusters/taps | 3GPP TR 38.901 表 7.7.1/7.7.2 | 表值**手工转录** JSON + 双确认；期望值=表值零换算搬运 | 数值逐项相等（表精度位数） | C-M3/C-M10 段 |
+| G4 | `tables/` | CDL-A/TDL-A（首批）定表 JSON 与期望 clusters/taps | 3GPP TR 38.901 表 7.7.1/7.7.2 | 定表 JSON=表值**手工转录** + 双确认（载荷零换算，T1-03c §5.4）；期望 clusters/taps 按**冻结换算契约**推导——`delay_norm × delay_spread_s → delay_s`（登记所用 delay_spread_s）、`power_db → power_linear`、**天顶角零换算**（T2-03 to_canonical 同一语义），推导脚本 `tools/golden/gen_tables.py`（仅 numpy） | 数值逐项相等（换算后按推导精度） | C-M3/C-M10 段 |
 | G5 | `matrices/` | 黄金几何解析例：2×2 半波长 ULA broadside → R=全1秩1；斜入射相位差 `2π/λ·d·cosθ` 系列；velocity→f_d 逐径解析值 | 数学推导（推导文档随库，`docs/` 内引用《T1-06》） | `tools/golden/gen_matrices.py`（仅 numpy）生成 + 推导文档对照 | `np.allclose`，容差 ≤1e-10（理想 fixture） | U-M5 段、I-ORCH-010 |
 | G6 | `calib/` | 谱归一系数组：Jakes/平坦/混合多 Tap，per_tap 与 total 双模式期望增益 | 解析能量比推导（《T2-08》§3.1 公式） | `tools/golden/gen_calib.py`（仅 numpy） | `np.allclose`，容差 ≤1e-12 | U-M8 段 |
 | G7 | `merge/` | 量化合并对照集：同输入下旧 `tdl.py` 输出（相干叠加/0..1050 丢弃计数/不夹端点），归一化列除外 | 旧 `channel_simulator/tdl.py`（**历史资产**，冻结于收编时点的 commit 哈希） | 收编时点运行旧实现一次性落库，provenance 记 commit——此后旧实现变动不追随 | 数值逐项相等（归一化列按传入 ref 重算） | U-M4 段 |
 | G8 | `api/` | `openapi.json` 快照、problem+json fixture 集（每 error_code 一例）、SCPI 指令表黄金响应、allowed_ops 词表 | /v1 合同（T2-07 §2/§3 表 + T2-06 §3 状态表） | 首版随 M7 合同评审冻结（合同先行于实现，T2-07 §8）；**双向消费**：M7 契约测试与 M9 异常映射测试读同一份 | JSON 结构化 diff（键序无关）；SCPI 逐字节 | C-M7/C-M9 段 |
 | G9 | `codec/` | 六类 codec 黄金样本 + v1.0→v1.1 迁移矩阵样本（portmap/frame 按来源分支/phase_rad 全分支，含拒绝分支） | T1-03c §10 迁移规则 + 各来源 v1.0 样本（手工构造最小化 JSON） | 手工构造 v1.0 样本（每分支一份，含 SchemaMigrationAmbiguous 触发样本）；期望 v1.1 按规则手工推导 | JSON 结构化 diff；拒绝分支断言异常类型 | C-M10 段、I-MIG-001 |
-| G10 | `idempotence/` | 幂等锚：固定 scenario fixture 的 model_id/artifact_hash 期望值 | 确定性契约（同输入同 id）——**唯一允许「实现首跑落锚」的域**：首跑值经评审冻结为锚，此后任何漂移=破坏确定性（回归性质，非正确性出处） | P1 首个稳定版本跑一次落锚 + 评审冻结 | 字符串相等 | C-M6 段、S-UC7 |
+| G10 | `idempotence/` | 幂等锚三件套：固定 scenario fixture 的 model_id、artifact_hash、**渲染帧序列字节存档**（frameplan-bin，逐字节比对——缺帧字节则序列化不确定性/hash 与产物错配无从捕获） | 确定性契约（同输入同 id）——**唯一允许「实现首跑落锚」的域**：首跑值经评审冻结为锚，此后任何漂移=破坏确定性（回归性质，非正确性出处） | P1 首个稳定版本跑一次落锚 + 评审冻结 | 字符串相等 | C-M6 段、S-UC7 |
 | G11 | `trajectory/` | **B+ 黄金轨迹（预留）**：直线匀速 UMa 轨迹的 B+ 回放 vs A 档 `.asc` 参考 | 《T1-15》§7 验收判据 | 随 B+ 排期（H1–H4 确认后）；目录先建、provenance 标 planned | 一致性对比（判据随 T3-03 C1–C4 定标） | HR 段（T3-03） |
 
 - G10 的例外性显式声明：幂等锚**不证明数值正确**（正确性由 G1–G9 证明），只钉「不再漂移」——两类资产的性质差异在 provenance.md 首行标注，防误用。

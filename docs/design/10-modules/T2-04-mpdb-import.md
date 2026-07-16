@@ -161,7 +161,9 @@ def quantize_delays(delay_s: ndarray) -> tuple[ndarray, QuantReport]
     # 超出 0..1050 的径 **丢弃**（T1-05 §6 冻结契约：丢弃并计数上报，
     # ★不得夹到端点 bin——夹取会把不存在的能量堆到 0/1050）；
     # QuantReport = {dropped_low/high 计数 + 丢弃掩码}，并入 ImportReport（§6），不静默
-def merge_bins(delay_code, gain) -> list[Bin]               # 同 bin 复增益相干叠加（保相位）；noncoherent 仅用于功率统计
+def merge_bins(delay_code, gain, angles) -> list[Bin]       # 同 bin 复增益相干叠加（保相位）；noncoherent 仅用于功率统计
+                                                            #   ★angles=每径角度列（AoA/AoD 方位+天顶，随径表对位入参——签名必须
+                                                            #   携角度，否则 bin 内角度合并无从计算）；Bin 携合并后角度供下游相关合成
                                                             #   ★bin 内角度合并（《T1-15》D5）：功率加权平均——方位角按圆统计
                                                             #   （加权复单位向量求辐角，防 359°/1° 线性平均成 180°），天顶角线性加权
 def select_strongest(bins, k≤24, power_mode) -> list[Bin]   # ★排序功率按 power_mode 取：

@@ -24,13 +24,18 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `/version` | GET | 网关标识 + `api_version`（SDK/第三方**版本协商面**，T2-09 §2 首调探测的即此端点）——静态元数据，零 L3 | **免鉴权**（公开探测；不泄内部拓扑） | 同步 |
 | `/devices` · `/devices/{id}` | GET | registry 列表/详情 + `readback` 健康 | read | 同步 |
 | `/devices` | POST/DELETE | ——预留 P4（《T1-10》多设备）：**501 + Problem**（feature-flag 关闭态） | control | —— |
-| `/imports` | POST | ImportJobService.submit（M4，异步 job） | write | **202** + job_id |
+| `/imports` | POST `{kind, ...}` | ImportJobService.submit（异步 job）——`kind=mpdb`（M4 导入）\| `kind=cdl_tdl_table`（定表 JSON 直录，经 `cdl_tdl_reader` 物化入 ModelRepo，T2-10——「任一层输入」的 API 落点） | write | **202** + job_id |
+| `/imports/validate` | POST `{portmap, ctx}` | **同步预检**：复用 M4 纯函数 `validate_portmap`（V1–V7，T2-04 §3.2——ctx 含 topology/path_expansion/test_mode/arrays/目标后端）→ 200 或 422+field_errors。**只校验不落任何状态**（向导即时回显的 API 通道；LINK 表分模式核验依赖库数据，仍在提交后的 job 内） | write | 同步 |
 | `/imports/{job}` | GET | job 状态/结果（成功=model_id 句柄） | read | 轮询 |
 | `/models/{id}` | GET | model_repo 元数据 + 报告（**不回吐张量**；imports 句柄的解引用面——《T1-04》隐含） | read | 同步 |
-| `/scenarios` | GET/POST | scenario_repo 列表/创建（version=1） | read/write | 同步 |
+| `/models/{id}/view` | GET | **渲染投影**（`viz-json/v1`——服务端由 canonical model 投影出的渲染数据集：PDP 序列、角度散点、R 矩阵、栅格占用、taps 概要、CIR 引用；可视化台取数面，T2-11 ③/S2）。**canonical 本体不直出**——《T1-04》§7 冻结口径「canonical model 是内部契约，不直接暴露给 API 版本」：投影 schema 随 /v1 合同演进，canonical 变更由投影层吸收；投影是 REST 响应 shape（OpenAPI 内），非持久化格式、不入 M10 注册表 | read | 同步 |
+| `/auth/me` | GET | 当前凭据自述 `{key_id, scope, expires, csrf_token}`——**HttpOnly Cookie 下前端无法解析令牌**，scope 门控与 CSRF 双提交 token（§4）的共同自举面（T2-11 §2）；`csrf_token` 仅 Cookie 会话下发（API-Key 调用无 CSRF 面，字段缺省） | 任一已认证 | 同步 |
+| `/blobs/{ref}` | GET | 内容寻址 blob **只读流式**下载（CIR 播放预览、超限系数等引用取数面；经 M10 open_stream 直出不进内存） | read | 同步 |
+| `/scenarios` | GET `?query=&tag=&level=` /POST | scenario_repo 列表/创建（version=1）。检索参数：`query`=名称模糊、`tag`=标签（T2-06 §2 Scenario.tags）、`level`=**服务端由 source 推导**（Mpdb→RT；Engine→按场景枚举映射 UMa/UMi/RMa/InH→GCM、CDL-x→CDL、TDL-x→TDL，**且 want_cir 置位时一律 TDL+CIR 徽标**——T2-03 §3 转换即 level=TDL/realization=CIR；ModelRef→模型元数据 level）——列表响应含该推导字段（①视图徽标数据源，GUI 不自行推导） | read/write | 同步 |
+| `/scenarios/{id}/versions` | GET | **版本历史列表**（version / created_at / created_by / 变更摘要——①视图版本树数据源；`?version=` 单版读取仍走 `/scenarios/{id}`） | read | 同步 |
 | `/scenarios/{id}` | GET(`?version=`)/PUT/DELETE | 读指定版；**PUT=创建新 version**（版本不可变，T2-06 §2）；DELETE=**归档**（被会话/审计引用，禁止物理删） | read/write | 同步 |
 | `/sessions` | POST `{scenario_id, version, device_id?, backend}` | M6 create（锁定版本） | control | 同步 |
-| `/sessions/{id}` | GET | 状态机态 + **current_op / completed_ops**（有界终局历史——客户端 wait 的 op 关联锚点，T2-06 §2，防 re-apply 旧态误判与续等挂死）+ reports + last_apply + **last_error**（异步失败的结构化错误，T2-06 §2——RESOLVE_FAILED 等终态的唯一定位来源，直译 §3 problem+json 扩展字段）+ tweaks | read | 轮询 |
+| `/sessions/{id}` | GET | 状态机态 + **allowed_ops**（M6 按 T2-06 §3 状态表裁决的当前态允许操作集——与 §3 的 409 扩展字段**同源同名**；GUI/客户端按钮可用性的前置驱动面，S1 缺口回馈产物：客户端不得自行由 state 推导）+ **current_op / completed_ops**（有界终局历史——客户端 wait 的 op 关联锚点，T2-06 §2，防 re-apply 旧态误判与续等挂死）+ reports + last_apply + **last_error**（异步失败的结构化错误，T2-06 §2——RESOLVE_FAILED 等终态的唯一定位来源，直译 §3 problem+json 扩展字段）+ tweaks | read | 轮询 |
 | `/sessions/{id}/resolve` | POST | M6 `submit_resolve`（任务在 M6 运行器内，网关不持协程，T2-06 §4 提交面） | control | **202** |
 | `/sessions/{id}/apply` | POST `?dry_run=` | M6 `submit_apply(auto_resolve=True)`——CREATED 态由 **M6 内部**先 resolve 再 apply；dry_run=true 走同步 `apply(dry_run=True)` 直返 manifest（**仅 READY/ACTIVE**：CREATED 时 M6 抛 InvalidState → 409 指明先 resolve——物化长耗时不得混入同步路径）。网关不检查状态、不编排、不持协程（单次 L3 调用） | control | 202（dry_run 同步返 manifest） |
 | `/sessions/{id}/artifact` | GET `?channel=&format=` | **产物下载**（READY 起可用，M6 artifacts 缓存直出、零设备触达）：asc→全信道 zip 或 `?channel=i_o` 单文件 text/plain；rfsoc→帧序列 octet-stream 或 `?format=manifest` 摘要 JSON。CI 黄金对比与《T1-04》G4「同 scenario 产两种后端产物」的取回面（SDK `apply(out=...)` 即封装此端点落盘）；CREATED 态 → 409 指明先 resolve | read | 同步 |
@@ -39,7 +44,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `/sessions/{id}/close` | POST `{release}` | M6 close（DIRTY 强制 reset 由 M6 裁决，网关只透传） | control | 同步 |
 | `/sessions/{id}/recover` | POST | M6 `submit_recover`（RESET+重 apply，任务在 M6 运行器内） | control | 202 |
 | `/telemetry` | GET | M8 快照服务 | read | 同步 |
-| `/telemetry/stream` | GET | M8 订阅（SSE；`Last-Event-ID` 窗内续传，窗外流内首发 `resync` 事件指示快照重拉——EventSource 无非 200 语义） | read | SSE |
+| `/telemetry/stream` | GET `?last_event_id=` | M8 订阅（SSE；`Last-Event-ID` 窗内续传，窗外流内首发 `resync` 事件指示快照重拉——EventSource 无非 200 语义）。**查询参数 `last_event_id` 与同名头等价**（头优先）——浏览器原生 EventSource 无法自设任意头：在线重连用头（浏览器自动），**回放游标用查询参数**（T2-11 ⑤ 历史回看的可实现面） | read | SSE |
 
 - **长耗时异步化**（《T1-04》§3 约定）：202 响应体分两类——**会话操作**（resolve/apply/recover）返回 `{session_id, op_id, poll_url}`：`op_id` 来自 M6 提交面 OperationRef（T2-06 §4），`poll_url` 指向 GET `/sessions/{id}`（**Session.state 即进度**，不设独立任务端点）；**导入任务**（POST `/imports`）返回 `{job_id, poll_url}`：`poll_url` 指向 GET `/imports/{job_id}`（job 非会话，无 OperationRef）。同会话在途操作冲突 → M6 OperationInFlight → 409。
 - **M8 依赖接口先行声明**（同 T2-03 定义引擎侧契约的做法）：M7 消费 `TelemetrySnapshot get_snapshot(device_id)` 与 `AsyncIterator[TelemetryEvent] subscribe(device_id, last_event_id?)`——具体语义 T2-08 为规范。
@@ -68,7 +73,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 
 ## 4. 认证 / 鉴权 / 审计 / 限流（《T1-04》§6 落地）
 
-- **认证**：API-Key（第三方，Header）＋短时会话令牌（GUI）。本地部署默认静态密钥表（M10 配置承载）；OIDC/IdP 为可插拔后续项（商用部署）。
+- **认证**：API-Key（第三方，Header）＋短时会话令牌（GUI，HttpOnly Cookie 承载——T2-11 §2）。本地部署默认静态密钥表（M10 配置承载）；OIDC/IdP 为可插拔后续项（商用部署）。**Cookie 会话的 CSRF 防护**：Cookie 置 `HttpOnly`+`Secure`+`SameSite=Strict`（同源部署、无跨站合法场景），且网关对一切**非安全方法**（POST/PATCH/DELETE）校验 `X-CSRF-Token` 头——token 经 `/auth/me` 下发（双提交模式），缺失/不符 → 403；API-Key 头认证的调用不受此约束（非环境凭据、无 CSRF 面）。
 - **鉴权三档 scope**（递进包含）：
   `read`（遥测/场景/模型/会话状态 GET）⊂ `write`（imports/scenarios 写）⊂ `control`（sessions 的 apply/tweak/close/recover 及一切**触达设备**操作）。
 - **审计中间件**：control 域每次调用（**含失败与被拒**）→ `AuditRecord{key_id?, when, op, session_id?, manifest_digest?, outcome}` → M10 append-only。三个可空字段的语义：`key_id?`——未认证或认证失败的调用无已解析 key，为空并在 outcome 细节记拒因与来源标识（remote addr/连接 id）；`session_id?`——会话尚不存在或创建被拒的调用（如未授权 `POST /sessions`）为空；`manifest_digest?`——仅**产物就绪的设备触达操作**（apply / tweak / close 微帧）填写，resolve 提交与创建类为空（此时无产物可摘要）。**同步操作记终局 outcome；异步提交记「受理」（含 op_id）**——终局结果由 M6 任务运行器在任务完成时写入会话审计（T2-06 §2：审计域=会话生命周期全记录，**含 resolve 这类非设备触达任务的终局**），网关**不依赖后续轮询闭合审计**；GET 类请求纯读、零审计写。与 M6 会话内审计**互补不重复**：网关记「谁经哪个门做了什么请求」，M6 记「会话/设备上实际发生了什么」。

@@ -97,14 +97,17 @@ def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 
                     (r.delay_s,
                      r.gain * steer(model.meta.arrays.tx, m, r.aod_az_deg, r.aod_zen_deg, lam)
                             * conj(steer(model.meta.arrays.rx, n, r.aoa_az_deg, r.aoa_zen_deg, lam)),
-                     angles(r))
+                     angles(r),
+                     doppler_of(r, cfg, lam))   # ★逐径多普勒（《T1-05》§5 链：Ray.doppler_hz 直读 >
+                                                #   velocity_tx/rx 双端重算 > default）——随径穿透到合并
                     for r in rays_of(ref)]
 
     # Phase 3：逐信道对 量化→合并→选径（调 M4 函数集；输入已带导向相位）
     binned = {}
     for io, rays in pairs.items():
-        codes, quant = quantize_delays([d for d,_,_ in rays])     # 超范围丢弃+计数（M4 契约）
-        bins = merge_bins(codes, gains)                           # 同 bin 复增益相干叠加（保相位）
+        codes, quant = quantize_delays([d for d,_,_,_ in rays])   # 超范围丢弃+计数（M4 契约）
+        bins = merge_bins(codes, gains, angs, dopplers)           # 同 bin 相干叠加（保相位）；角度/多普勒
+                                                                  #   按功率加权聚合（T2-04 §5，v1.2）
         binned[io] = select_strongest(bins, k=cfg.max_paths, power_mode=cfg.power_mode)
 
     # Phase 4：★全系统共享归一化基准（正确性要点 2）——先全局扫描再归一

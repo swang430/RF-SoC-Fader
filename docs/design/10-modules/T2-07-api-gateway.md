@@ -28,6 +28,8 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `/imports/validate` | POST `{portmap, ctx}` | **同步预检**：复用 M4 纯函数 `validate_portmap`（V1–V7，T2-04 §3.2——ctx 含 topology/path_expansion/test_mode/arrays/目标后端）→ 200 或 422+field_errors。**只校验不落任何状态**（向导即时回显的 API 通道；LINK 表分模式核验依赖库数据，仍在提交后的 job 内） | write | 同步 |
 | `/imports/{job}` | GET | job 状态/结果（成功=model_id 句柄） | read | 轮询 |
 | `/models/{id}` | GET | model_repo 元数据 + 报告（**不回吐张量**；imports 句柄的解引用面——《T1-04》隐含） | read | 同步 |
+| `/models/{id}/payload` | GET | **完整 canonical model-json 载荷**（rays/clusters/taps/correlation/grid 等——可视化台渲染面，T2-11 ③/S2；`cir_ref`/`$blob` **保持引用形态不展开**，本体轻量有保证——≤10MB 内联规则，T2-10 §4）| read | 同步 |
+| `/blobs/{ref}` | GET | 内容寻址 blob **只读流式**下载（CIR 播放预览、超限系数等引用取数面；经 M10 open_stream 直出不进内存） | read | 同步 |
 | `/scenarios` | GET/POST | scenario_repo 列表/创建（version=1） | read/write | 同步 |
 | `/scenarios/{id}` | GET(`?version=`)/PUT/DELETE | 读指定版；**PUT=创建新 version**（版本不可变，T2-06 §2）；DELETE=**归档**（被会话/审计引用，禁止物理删） | read/write | 同步 |
 | `/sessions` | POST `{scenario_id, version, device_id?, backend}` | M6 create（锁定版本） | control | 同步 |

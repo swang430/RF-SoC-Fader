@@ -39,7 +39,9 @@ registry = {
                       #   归一化 delay_norm，×RMS 时延扩展得物理 delay_s（与 T2-03 引擎 CDL/TDL-x
                       #   同一缩放语义，CDL 定表同样需要）；phase_seed（默认 0）——确定性合成 Tap
                       #   初相（gain=√P·e^{jφ}，canonical Tap 要求复增益，与 T2-03 taps.phase_rad
-                      #   同思想）。两参数均入 provenance 可复现
+                      #   同思想）。CDL 定表另随请求携 arrays+portmap（reader 写入 meta.arrays 与
+                      #   provenance.portmap，与 M4/M3 对称——M5 退化前置要求；TDL 直通不需）。
+                      #   全部物化参数入 provenance 可复现
 }
 def encode(kind, obj, blobs: BlobStore | None = None) -> bytes    # 编码超阈聚合时需 blobs 承接 $blob 落库
 def decode(kind, data, meta=None, blobs: BlobStore | None = None) -> obj

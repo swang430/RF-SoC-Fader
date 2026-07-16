@@ -176,8 +176,13 @@ async def apply(sess, dry_run=False, auto_resolve=True) -> ApplyResult | Manifes
     require_state(sess, {READY, ACTIVE})                 # ★非 dry-run 前置：CREATED 且 auto_resolve=False
                                                          #   在此显式拒（InvalidStateError, allowed_ops=[resolve]）
                                                          #   ——不得带着 artifacts=None 落到租约/下发
-    audit_begin(sess, who, manifest_digest)              # ★审计先行（T2-10 §6）且【先于租约】：受理落盘
-                                                         #   失败→拒绝执行——预检失败不得留下已占租约的副作用
+    audit_begin(sess, who, manifest_digest,
+                blocking=(sess.device_id is not None))   # ★审计先行（T2-10 §6）且【先于租约】：受理落盘失败
+                                                         #   →拒绝执行——预检失败不得留下已占租约的副作用。
+                                                         #   ★「预检拒绝」仅对真实设备触达（rfsoc）生效；asc
+                                                         #   （device_id=None，纯文件产物）属 T2-10 §6 ②非触达类：
+                                                         #   审计同样持久（失败入重试队列）但不作执行前置——
+                                                         #   不因审计库抖动拒文件导出
     try:
         if sess.device_id is not None:                   # asc 无设备语义，跳过租约
             leases.try_acquire(sess.device_id, owner=sess.session_id)

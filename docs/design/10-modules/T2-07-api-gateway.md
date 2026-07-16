@@ -73,7 +73,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 
 ## 4. 认证 / 鉴权 / 审计 / 限流（《T1-04》§6 落地）
 
-- **认证**：API-Key（第三方，Header）＋短时会话令牌（GUI）。本地部署默认静态密钥表（M10 配置承载）；OIDC/IdP 为可插拔后续项（商用部署）。
+- **认证**：API-Key（第三方，Header）＋短时会话令牌（GUI，HttpOnly Cookie 承载——T2-11 §2）。本地部署默认静态密钥表（M10 配置承载）；OIDC/IdP 为可插拔后续项（商用部署）。**Cookie 会话的 CSRF 防护**：Cookie 置 `HttpOnly`+`Secure`+`SameSite=Strict`（同源部署、无跨站合法场景），且网关对一切**非安全方法**（POST/PATCH/DELETE）校验 `X-CSRF-Token` 头——token 经 `/auth/me` 下发（双提交模式），缺失/不符 → 403；API-Key 头认证的调用不受此约束（非环境凭据、无 CSRF 面）。
 - **鉴权三档 scope**（递进包含）：
   `read`（遥测/场景/模型/会话状态 GET）⊂ `write`（imports/scenarios 写）⊂ `control`（sessions 的 apply/tweak/close/recover 及一切**触达设备**操作）。
 - **审计中间件**：control 域每次调用（**含失败与被拒**）→ `AuditRecord{key_id?, when, op, session_id?, manifest_digest?, outcome}` → M10 append-only。三个可空字段的语义：`key_id?`——未认证或认证失败的调用无已解析 key，为空并在 outcome 细节记拒因与来源标识（remote addr/连接 id）；`session_id?`——会话尚不存在或创建被拒的调用（如未授权 `POST /sessions`）为空；`manifest_digest?`——仅**产物就绪的设备触达操作**（apply / tweak / close 微帧）填写，resolve 提交与创建类为空（此时无产物可摘要）。**同步操作记终局 outcome；异步提交记「受理」（含 op_id）**——终局结果由 M6 任务运行器在任务完成时写入会话审计（T2-06 §2：审计域=会话生命周期全记录，**含 resolve 这类非设备触达任务的终局**），网关**不依赖后续轮询闭合审计**；GET 类请求纯读、零审计写。与 M6 会话内审计**互补不重复**：网关记「谁经哪个门做了什么请求」，M6 记「会话/设备上实际发生了什么」。

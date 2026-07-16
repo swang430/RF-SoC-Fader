@@ -33,9 +33,11 @@ registry = {
   "cdl-tdl-table-json/v1":  # 3GPP CDL/TDL 定表 ↔ JSON（T1-03c 一等定表入口，cdl_tdl_reader 消费——
                       #   「任一层输入」的用户直录面）。★表无相位列，相位来源分两支：
                       #   CDL 定表 → 经 M5 退化时按 cluster_phase_seed 兜底（T2-05 §3 优先级③）；
-                      #   TDL 定表 → level=TDL 直通不经 M5——cdl_tdl_reader 物化时按表内可选
-                      #   phase_seed（默认 0）确定性合成 Tap 初相（gain=√P·e^{jφ}——canonical Tap
-                      #   要求复增益，与 T2-03 引擎 TDL taps.phase_rad 同思想），种子入 provenance 可复现
+                      #   TDL 定表 → level=TDL 直通不经 M5——cdl_tdl_reader 物化时按【导入请求参数】
+                      #   phase_seed（默认 0，随 POST /imports kind=cdl_tdl_table 提交——★不入表载荷：
+                      #   表 schema 归 T1-03c §5.4 冻结，零自有字段）确定性合成 Tap 初相
+                      #   （gain=√P·e^{jφ}——canonical Tap 要求复增益，与 T2-03 引擎 TDL taps.phase_rad
+                      #   同思想），种子入 provenance 可复现
 }
 def encode(kind, obj, blobs: BlobStore | None = None) -> bytes    # 编码超阈聚合时需 blobs 承接 $blob 落库
 def decode(kind, data, meta=None, blobs: BlobStore | None = None) -> obj

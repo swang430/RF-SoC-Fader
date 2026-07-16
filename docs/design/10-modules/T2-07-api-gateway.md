@@ -28,7 +28,8 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `/imports/validate` | POST `{portmap, ctx}` | **同步预检**：复用 M4 纯函数 `validate_portmap`（V1–V7，T2-04 §3.2——ctx 含 topology/path_expansion/test_mode/arrays/目标后端）→ 200 或 422+field_errors。**只校验不落任何状态**（向导即时回显的 API 通道；LINK 表分模式核验依赖库数据，仍在提交后的 job 内） | write | 同步 |
 | `/imports/{job}` | GET | job 状态/结果（成功=model_id 句柄） | read | 轮询 |
 | `/models/{id}` | GET | model_repo 元数据 + 报告（**不回吐张量**；imports 句柄的解引用面——《T1-04》隐含） | read | 同步 |
-| `/models/{id}/payload` | GET | **完整 canonical model-json 载荷**（rays/clusters/taps/correlation/grid 等——可视化台渲染面，T2-11 ③/S2；`cir_ref`/`$blob` **保持引用形态不展开**，本体轻量有保证——≤10MB 内联规则，T2-10 §4）| read | 同步 |
+| `/models/{id}/view` | GET | **渲染投影**（`viz-json/v1`——服务端由 canonical model 投影出的渲染数据集：PDP 序列、角度散点、R 矩阵、栅格占用、taps 概要、CIR 引用；可视化台取数面，T2-11 ③/S2）。**canonical 本体不直出**——《T1-04》§7 冻结口径「canonical model 是内部契约，不直接暴露给 API 版本」：投影 schema 随 /v1 合同演进，canonical 变更由投影层吸收；投影是 REST 响应 shape（OpenAPI 内），非持久化格式、不入 M10 注册表 | read | 同步 |
+| `/auth/me` | GET | 当前凭据自述 `{key_id, scope, expires}`——**HttpOnly Cookie 下前端无法解析令牌**，菜单/按钮 scope 门控的自举面（T2-11 §2） | 任一已认证 | 同步 |
 | `/blobs/{ref}` | GET | 内容寻址 blob **只读流式**下载（CIR 播放预览、超限系数等引用取数面；经 M10 open_stream 直出不进内存） | read | 同步 |
 | `/scenarios` | GET `?query=&tag=&level=` /POST | scenario_repo 列表/创建（version=1）。检索参数：`query`=名称模糊、`tag`=标签（T2-06 §2 Scenario.tags）、`level`=**服务端由 source 推导**（Mpdb→RT；Engine→按场景枚举映射 UMa/UMi/RMa/InH→GCM、CDL-x→CDL、TDL-x→TDL，**且 want_cir 置位时一律 TDL+CIR 徽标**——T2-03 §3 转换即 level=TDL/realization=CIR；ModelRef→模型元数据 level）——列表响应含该推导字段（①视图徽标数据源，GUI 不自行推导） | read/write | 同步 |
 | `/scenarios/{id}/versions` | GET | **版本历史列表**（version / created_at / created_by / 变更摘要——①视图版本树数据源；`?version=` 单版读取仍走 `/scenarios/{id}`） | read | 同步 |

@@ -87,7 +87,8 @@ def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 
         # RT 已逐阵元对算径（几何真值，含近场效应）——无需导向合成
         for link in model.environment.links:
             io = portmap.map(link.tx_index, link.rx_index)        # ElementKey→(input,output)
-            pairs[io] = [(r.delay_s, r.gain, angles(r)) for r in rays_of(link)]
+            pairs[io] = [(r.delay_s, r.gain, angles(r), doppler_of(r, cfg, lam))  # ★四元组与下分支统一
+                         for r in rays_of(link)]
     else:  # single_reference：Phase 2 导向合成（★必须先于量化合并——正确性要点 1）
         ref = model.environment.links[0]
         for m in tx_elements(model.meta.arrays):

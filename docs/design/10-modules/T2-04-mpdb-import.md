@@ -31,11 +31,13 @@ def load(path: str) -> RawRtTable:
     db = MPDB.load(path)                                      # 直连，无中间件（已定）
     link  = require_columns(db.link,  ["TX","RX","TX_ANT_POSITION","RX_ANT_POSITION"])
     chan  = require_columns(db.channel, ["LINK_ID","DELAY","H","AOA","ZOA","AOD","ZOD","CHANNEL_TYPE"])
-    # ★DOPPLER 为 v3.2.6+ 可选列——presence 探测消费，**不入 require_columns**（旧库兼容，见下方规则）
+    has_doppler = "DOPPLER" in columns_of(db.channel)         # ★v3.2.6+ 可选列——presence 探测，
+    #   **不入 require_columns**（旧库兼容，见下方规则）；在场时随 chan 一并取列
     return RawRtTable(
         links = with_synthetic_link_id(to_numpy(link)),   # ★LINK 表无 LINK_ID 列（手册 §2.1）——
         #   CHANNEL.LINK_ID 是 LINK 表的行索引：读取时合成 link_id = 行号(0-based)作为主键
         rays  = to_numpy(chan),          # 每径: delay[s], H[complex], 角度[deg, 天顶], type, doppler[Hz]?(可选)
+        has_doppler = has_doppler,       # ★随表携出——§4 管线与 provenance 的唯一判定源
     )
 ```
 
@@ -137,7 +139,8 @@ def import_mpdb(source, arrays: {tx: AntennaArray, rx: AntennaArray},
                  rays=[Ray(delay_s=r.delay, gain=r.H,               # ★物理量原样；复数=单极化标量
                            aoa_az_deg=r.AOA, aoa_zen_deg=r.ZOA,     # ★天顶角保留
                            aod_az_deg=r.AOD, aod_zen_deg=r.ZOD,
-                           doppler_hz=(r.DOPPLER if has_doppler else None),  # ★v1.2 可选直读（Hz 零换算）
+                           doppler_hz=(r.DOPPLER if raw.has_doppler else None),  # ★v1.2 可选直读（Hz 零换算，
+                           #   判定源=reader 携出的 raw.has_doppler，§2）
                            type=r.CHANNEL_TYPE) for r in rays_of(l)])   # 列名与 §2 reader 契约一致
             for l in raw.links]),
         provenance=Provenance(source_type="MPDB", source_ref=str(source),

@@ -30,7 +30,8 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `/models/{id}` | GET | model_repo 元数据 + 报告（**不回吐张量**；imports 句柄的解引用面——《T1-04》隐含） | read | 同步 |
 | `/models/{id}/payload` | GET | **完整 canonical model-json 载荷**（rays/clusters/taps/correlation/grid 等——可视化台渲染面，T2-11 ③/S2；`cir_ref`/`$blob` **保持引用形态不展开**，本体轻量有保证——≤10MB 内联规则，T2-10 §4）| read | 同步 |
 | `/blobs/{ref}` | GET | 内容寻址 blob **只读流式**下载（CIR 播放预览、超限系数等引用取数面；经 M10 open_stream 直出不进内存） | read | 同步 |
-| `/scenarios` | GET/POST | scenario_repo 列表/创建（version=1） | read/write | 同步 |
+| `/scenarios` | GET `?query=&tag=&level=` /POST | scenario_repo 列表/创建（version=1）。检索参数：`query`=名称模糊、`tag`=标签（T2-06 §2 Scenario.tags）、`level`=**服务端由 source 推导**（Mpdb→RT；Engine→按场景枚举映射 GCM/CDL/TDL；ModelRef→模型元数据 level）——列表响应含该推导字段（①视图徽标数据源，GUI 不自行推导） | read/write | 同步 |
+| `/scenarios/{id}/versions` | GET | **版本历史列表**（version / created_at / created_by / 变更摘要——①视图版本树数据源；`?version=` 单版读取仍走 `/scenarios/{id}`） | read | 同步 |
 | `/scenarios/{id}` | GET(`?version=`)/PUT/DELETE | 读指定版；**PUT=创建新 version**（版本不可变，T2-06 §2）；DELETE=**归档**（被会话/审计引用，禁止物理删） | read/write | 同步 |
 | `/sessions` | POST `{scenario_id, version, device_id?, backend}` | M6 create（锁定版本） | control | 同步 |
 | `/sessions/{id}` | GET | 状态机态 + **allowed_ops**（M6 按 T2-06 §3 状态表裁决的当前态允许操作集——与 §3 的 409 扩展字段**同源同名**；GUI/客户端按钮可用性的前置驱动面，S1 缺口回馈产物：客户端不得自行由 state 推导）+ **current_op / completed_ops**（有界终局历史——客户端 wait 的 op 关联锚点，T2-06 §2，防 re-apply 旧态误判与续等挂死）+ reports + last_apply + **last_error**（异步失败的结构化错误，T2-06 §2——RESOLVE_FAILED 等终态的唯一定位来源，直译 §3 problem+json 扩展字段）+ tweaks | read | 轮询 |

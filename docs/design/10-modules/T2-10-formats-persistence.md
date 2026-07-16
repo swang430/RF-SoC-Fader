@@ -53,7 +53,7 @@ def sniff(data, meta=None) -> kind
 | :-- | :-- | :-- |
 | `ScenarioRepo` | Scenario 全版本 | **版本不可变**（追加式）；并发创建新版本由**乐观锁**裁决（冲突→VersionConflict，M7 映 409，T2-06 §6） |
 | `SessionRepo` | Session 快照 | 每次 transition/set_artifacts/append_tweak 写新快照；**重启恢复数据面**（T2-06 §3：状态降级、孤儿 current_op 清理、completed_ops 有界历史的持久载体） |
-| `AuditRepo` | 审计双源 | **append-only**（无 UPDATE/DELETE 路径——接口层面不提供）；网关受理记录（T2-07 §4）+ 会话生命周期终局（T2-06 §2）两源同仓不同 kind |
+| `AuditRepo` | 审计双源 | **append-only**（无 UPDATE/DELETE 路径——接口层面不提供）；网关受理记录（T2-07 §4）+ 会话生命周期记录（T2-06 §2）两源同仓不同 kind。**会话侧 begin/end 是两条 op_id 关联的追加记录**（append-only 不允许两阶段改同一条）——完整性不变式=每 begin 恰有一 end（进程崩溃的孤儿 begin 由重启清理补 `aborted` end，T2-06 §3） |
 | `ModelRepo` | canonical model | **内容寻址**：model_id = **规范化载荷**的 sha256——规范化=剔除 `id` 字段自身（否则哈希依赖哈希、循环自指）与 provenance 墙钟字段（imported_at 等，不改变物理内容；seed/配置差异**保留**——不同来源配置就该不同 id）+ 键序/浮点表示规范化；入库后回填 `id=hash`（`put` 幂等）。**引用纪律**：各产生模块（M4/M3/M5）内部 `new_id()` 仅过程占位——凡**跨模块引用**（`reduced_from`/`model_ref`/provenance 链）必须用入库后的 hash id，否则溯源链指向库中不存在的瞬态 id（T2-06 §4 编排层在 materialize/reduce 后各 put 一次即保证此序）。同物理内容+同来源配置 → 同 model_id（幂等链存储面） |
 | `ConfigRepo` | 告警规则/校准表/密钥表/运行参数 | 版本化配置（M8 阈值、bypass 表、M7 密钥与 scope、缓冲窗 N 等）；变更留痕 |
 
@@ -81,7 +81,7 @@ class BlobStore:
 
 - 首版本地文件系统：blob 目录（两级 sha 前缀分桶）+ SQLite 文件 + 配置文件；路径策略集中于此（AscCirBackend「写文件（路径策略经 M10 I/O 适配层）」的落点，T2-02 §4）。
 - 接口抽象 `Storage`（read/write/stream/list/delete）——对象存储（S3 兼容）为替换实现（商用部署项），业务零改动。
-- 原子写分两级：**单文件**=临时文件 + rename（同目录）；**多文件产物**（AscFileSet 等）=**目录级原子提交**——全部文件写入 `<target>.tmp/` → fsync → 单次目录 rename 落位（同文件系统内原子）：逐文件 rename 中途崩溃会留下「部分文件已提交」的产物目录（M2 asc 的 committed 语义是**整集**写盘成功，T2-02 §4），目录级提交下半写只可能是 `.tmp` 残留（启动清扫），final 目录要么全有要么没有。均与 §2 sha256 校验双保险。
+- 原子写分两级：**单文件**=临时文件 + rename（同目录）；**多文件产物**（AscFileSet 等）=**目录级原子提交**——全部文件写入 `<target>.tmp/` → fsync → 单次目录 rename 落位（同文件系统内原子）：逐文件 rename 中途崩溃会留下「部分文件已提交」的产物目录（M2 asc 的 committed 语义是**整集**写盘成功，T2-02 §4），目录级提交下半写只可能是 `.tmp` 残留（启动清扫），final 目录要么全有要么没有。**已存在旧产物的替换**：目录 rename 无法原子覆盖非空目标——采用**版本目录+符号链接切换**（写 `<target>.v{N}/` → `symlink+rename` 原子替换链接 `<target>`；旧版本目录进延迟回收，同 §4 GC 宽限）——读方经链接看到的永远是完整旧集或完整新集。均与 §2 sha256 校验双保险。
 
 ---
 

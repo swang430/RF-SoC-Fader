@@ -151,4 +151,4 @@ class BlobStore:
 - 六类 codec 往返黄金 + NPZ/asc 与源契约（NPZ→T2-03 §2；asc→《T1-08》+ChannelEgine 样例）逐键核对全绿。
 - 乐观锁/append-only/内容寻址/blob 生命周期测试全绿。
 - 原子写注入测试与 T2-06 重启恢复用例联合通过（数据面自洽）。
-- T1-03c v1.0→v1.1 迁移钩子：v1.0 样本无损升级——黄金用例**按来源分支全覆盖**：portmap 升格（载体在场/缺失重建+降级标注）；frame 按来源（MPDB→world；引擎统计→local+origin 回填；引擎定表→local 无锚定；table 无 arrays 跳过；manual→SchemaMigrationAmbiguous 拒）；phase_rad 回填（载体在场/缺失缺省）。
+- T1-03c v1.0→v1.1 迁移钩子：v1.0 样本无损升级——黄金用例**按来源分支全覆盖**：portmap 升格（载体在场/缺失重建+降级标注）；frame 按来源与声明（MPDB 声明在场→按声明、缺失+position→world、缺失+index→拒；引擎统计→local+origin 逐端回填；引擎定表→local 无锚定；table 无 arrays 跳过；manual→SchemaMigrationAmbiguous 拒）；phase_rad 回填（载体在场/缺失缺省）。

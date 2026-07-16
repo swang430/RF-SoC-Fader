@@ -157,7 +157,10 @@ async def resolve(sess) -> ResolvedArtifacts:
     fidelity = None
     if model.level in {"RT", "GCM", "CDL"}:
         if scen.synthesis is None: raise ScenarioError("synthesis 必填：模型层级需退化")
-        model, fidelity = synthesizer.reduce_to_tdl(model, portmap_of(scen), scen.synthesis)  # M5
+        model, fidelity = synthesizer.reduce_to_tdl(model, portmap_of(scen, model), scen.synthesis)  # M5
+        # ★portmap_of 三源定义：Mpdb/EngineSource → source 自带（与入库后 model.meta.port_map
+        #   同一份，T2-05 §2 一致性裁决）；ModelRefSource → **model.meta.port_map**（v1.1 模型
+        #   自携——直引模型无独立 portmap 来源）；需退化而两处皆缺 → ScenarioError
 
     # ③ 能力门：产物形态 × 设备能力（通用 fader 原则：不满足→显式拒，不静默降级）
     check_capabilities(model, caps)      # 例：realization=CIR 而 caps.supports_cir=False

@@ -100,8 +100,10 @@ AntennaArray {
   positions_m : float[n_elements][3]   # 阵元坐标(米)——所属坐标系由 frame 声明（v1.1）
   frame       : world | local          # ★v1.1（升级项②）：positions_m 的坐标系声明——
                                        #   缺省 world（v1.0 数据语义不变）
-  origin_m?   : [x,y,z]                # ★v1.1（升级项②）：阵列参考点的世界系落位——
-                                       #   frame=local 时必填（本地系→世界系平移）；world 时省略
+  origin_m?   : [x,y,z]                # ★v1.1（升级项②）：阵列参考点的世界系落位——world 时省略；
+                                       #   frame=local 且缺省 = **无世界锚定**（自由浮动阵列：局部几何
+                                       #   自足的消费——导向/相关计算——可用；position 身份解析等
+                                       #   需要世界系的消费显式拒）；需要世界落位时必填
   polarization : PolConfig             # 极化配置（含斜极化角）
   orientation?  : float[3]             # 阵列朝向（可选；frame=local 时与 origin_m 共同构成变换）
 }
@@ -324,7 +326,7 @@ Provenance {
 - `schema_version` 语义化，**版本纪律（内部契约口径）**：canonical model **不直出对外 API**（《04》§7——对外是 /v1 REST 投影），全部消费者随平台同版部署，**不存在旧 reader 读新数据的场景**——因此兼容承诺是单向的**向前兼容读**（新读旧，经迁移钩子）；**主版本升级保留给「无法编写无损迁移钩子的语义重构」**，可钩子化的结构迁移（如本次 PortMap 字段搬移）走次版本。防御面：读到高于当前支持的版本 → `SchemaTooNew` 显式拒（T2-10 §6），不猜读。
 - **v1.0 → v1.1 变更与迁移**（读侧钩子归 M10 model-json codec，T2-10 §2；编码端只写 v1.1）：
   - **①port_map 一等化**：迁移**优先整体采用** `provenance.import_config["portmap"]`（v1.0 的规范载体，M4/M3 均按约定写入）升为 `Meta.port_map`；载体缺失时才由各 AntennaArray 的 `int[]` 投影重建（单极化键、`link_mode=per_element_pair`——重建属**降级假定**，迁移结果显式标注）。v1.0 的 `AntennaArray.port_map` 字段废止。
-  - **②frame/origin_m**：**按来源判定，不盲补**——`source_type=MPDB`（M4 路径，世界系口径）→ `frame=world`；`source_type=ChannelEgine_38901` → **`frame=local`**（引擎请求的 `req.arrays` 元素坐标是**阵列局部系**、世界落位由 geometry 承载——T2-03 §2），`origin_m` 从 `provenance.import_config` 的 `geometry.tx/rx_pos_m` 回填；来源无法判定（如 `manual`）→ **拒绝自动迁移**（`SchemaMigrationAmbiguous`，要求显式声明坐标系——猜错坐标系会让 position 身份解析与导向计算整体错位，宁拒不猜）。
+  - **②frame/origin_m**：**按来源判定，不盲补**——`source_type=MPDB`（M4 路径，世界系口径）→ `frame=world`；`source_type=ChannelEgine_38901` → **`frame=local`**（引擎请求的 `req.arrays` 元素坐标是**阵列局部系**——T2-03 §2），`origin_m` 分场景：统计场景（UMa/UMi/RMa/InH，geometry 必填）从 `provenance.import_config` 的 `geometry.tx/rx_pos_m` 回填；**CDL-x/TDL-x（geometry=None）→ `origin_m` 缺省=无世界锚定**（局部几何自足，§4 语义——簇伪径导向只需相对阵元位置，本就无世界落位可回填）；来源无法判定（如 `manual`）→ **拒绝自动迁移**（`SchemaMigrationAmbiguous`，要求显式声明坐标系——猜错坐标系会让 position 身份解析与导向计算整体错位，宁拒不猜）。
   - **③Cluster.phase_rad**：从 `provenance.import_config["cluster_phases"]`（v1.0 过渡载体，T2-03 §3）按链路×簇序回填；载体缺失则字段缺省（消费端按 T2-05 §3 优先级③种子兜底）。v1.1 起引擎转换**直写本字段**，过渡载体不再写入（读侧对 v1.0 旧数据保留兼容）。
   - **④coeffs 外置（复评结论，不改字段）**：`RayleighSpec.coeffs` 超阈值外置**不增设一等引用字段**——由 model-json codec 序列化层以 `$blob` 信封原位替换实现（T2-10 §2/§4）；本条 10MB 规则的强制性由 codec 层兑现，schema 字段形态不变。
 - **大体量**（time_varying CIR、256 系数×多径×多信道）支持**外置引用**（blob 句柄），JSON 只存元数据 + 引用。**阈值 = 10 MB**（已定）：序列化 ≤10 MB 内联，>10 MB 外置 blob。blob 格式（.npy/二进制）由 M10 定。

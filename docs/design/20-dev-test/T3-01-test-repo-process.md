@@ -85,7 +85,7 @@ async def test_disconnect_mid_apply_judged_dirty(fake_rfsoc): ...
 | GUI E2E | Playwright | T2-11 §6（UC2 旗舰全链 + HTTP 调用序录制）；独立 extras，核心开发不装 |
 | 仪器控制 | PyVISA（HIL-R） | T3-03 台架编排；hil extras |
 
-- **标记与选择器**：`-m unit|contract|integration|system` 按层选跑；`hil` 用例默认**不收集**（`--run-hil` 显式开启 + 台架环境变量在场才跑）；`slow` 标记供 PR gate 剪枝。层标记由目录自动注入（conftest），与 `tc` 标记并存。
+- **标记与选择器**：按层选跑用 pytest 布尔标记表达式——单层 `-m unit`，多层 `-m "unit or contract"`（MARKEXPR 语法为 `and/or/not`，**不是 `|`**——`|` 未加引号还会被 shell 当管道）；`hil` 用例默认**收集但跳过**（skip：未给 `--run-hil` 或台架环境变量缺失时自动 skip）——**必须保持可收集**，否则绿状态的 `HC-*/HR-*` 用例在 `pytest --collect-only` 中消失、§7 四查第 1 查误报；`slow` 标记供 PR gate 剪枝。层标记由目录自动注入（conftest），与 `tc` 标记并存。
 - conftest 层级：根 `conftest.py`（tc 标记注册、层自动标记、追溯钩子）→ 各层 conftest（fakes 夹具、环回端口分配）→ 域 conftest。
 
 ---

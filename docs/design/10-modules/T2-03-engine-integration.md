@@ -1,7 +1,7 @@
 # T2-03 · M3 信道模型引擎集成（功能设计）
 
 > 第二册《功能设计》· 第 3 篇（L3 `ChannelEngineClient` + 引擎侧服务契约）
-> 状态：草稿 v0.1 · 待评审
+> 状态：**v1.0 · 已冻结**（2026-07-16，tag: design-t2-v1.0）
 > 依据：《T1-07 引擎集成（微服务，ADR-5）》《T1-03b/03c》（冻结基线）；ChannelEgine 现有 `ChannelSimulator` API 与 `.asc` 产物
 > 消费方：M6（统计信道场景任务）、M5/M2（消费转换后的 canonical model）
 > 跨仓依赖：**ChannelEgine repo 需新增服务层**（本篇定义其契约；实现为独立工作项）

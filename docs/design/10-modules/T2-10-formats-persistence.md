@@ -40,7 +40,8 @@ registry = {
                       #   同一缩放语义，CDL 定表同样需要）；phase_seed（默认 0）——确定性合成 Tap
                       #   初相（gain=√P·e^{jφ}，canonical Tap 要求复增益，与 T2-03 taps.phase_rad
                       #   同思想）。CDL 定表另随请求携 arrays+portmap（reader 写入 meta.arrays 与
-                      #   provenance.portmap，与 M4/M3 对称——M5 退化前置要求）；TDL 定表另随请求携
+                      #   provenance.import_config["portmap"]——冻结 Provenance 仅有 import_config 字段，
+                      #   与 M4/M3 同一落位——M5 退化前置要求）；TDL 定表另随请求携
                       #   栅格拓扑（grid.topology 为 schema 必填，默认 8*8）与目标信道对列表
                       #   （默认 [(0,0)]，须 ⊆ 拓扑有效对——taps 落 channels[(in,out)]、grid 同步：
                       #   TDL 不经 M5、直通 M2 渲染按信道对键取数，无键无处落）。

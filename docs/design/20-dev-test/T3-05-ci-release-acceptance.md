@@ -20,7 +20,7 @@
 | Gate | 触发 | 编排内容 | 时间预算（试运行值） |
 | :-- | :-- | :-- | :-- |
 | **PR gate** | 每 PR | ①改动模块的 U/C 段 + 其消费者契约段（矩阵反查改动面）②`check_traceability.py` 四查（《T3-01》§7）③`tools/golden/` 禁 import 静态检查（《T3-04》铁律 1）④矩阵 diff 与代码 diff 对账（人工评审点） | < 5 min（`slow` 标记剪枝） |
-| **CI gate**（main 每合并） | merge 后 | L1–L3 全量 + 黄金全量 + coverage 分层报告（M1=100% 强制红线；其余首版目标见 §2.1） | < 20 min |
+| **CI gate**（main 每合并） | merge 后 | L1–L3 全量 + 黄金全量 + coverage 分层报告（M1=100% 强制红线；其余首版目标见 §2.1）+ **治理检查随跑**：`check_traceability.py` 四查（《T3-01》§7 明定进 CI gate——waiver 过期是时间性判定，仅在 PR 时查会让 main 带过期豁免保持绿）+ `tools/golden/` 禁 import 静态检查（《T3-04》铁律 1） | < 20 min |
 | **nightly** | 每日 | L4 系统全量（假引擎）+ **真引擎档**（回销《T3-02》§8-1：nightly 跑真引擎、发布/tag 前强制） | 不限 |
 | **发布 gate** | 版本发布 | L4 全量 + 黄金全量 + `S-PERF-001` 性能冒烟（阈值 §3-4）+ 发布 checklist（§5） | — |
 | **验收 gate** | 里程碑 P0–P4 | §4 映射表逐项 + HIL 报告（P1 起，模板《T3-03》§4）+ 矩阵快照归档 | — |

@@ -313,7 +313,7 @@ Provenance {
 | `coeffs` | complex[256] | — | 频域滤波系数 |
 | `phase_rad`（v1.1） | float | 弧度 | 簇初相（可选；缺省时消费端种子兜底） |
 | `frame`（v1.1） | enum | — | world \| local（缺省 world） |
-| `origin_m`（v1.1） | float[3] | 米 | frame=local 时必填 |
+| `origin_m`（v1.1） | float[3] | 米 | world 省略；local 可缺省=无世界锚定（需世界落位的消费必填，§4） |
 | `port_map` 映射值（v1.1） | int | — | 0..7（键=ElementKey；V1–V7 校验归 M4） |
 
 ---

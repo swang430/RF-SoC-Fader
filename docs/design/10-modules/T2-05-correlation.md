@@ -37,7 +37,8 @@ class SynthesisConfig:
     mode: Literal["B"]                  # A 档另走 ATimeVaryingSynthesizer（§6）
     power_mode: Literal["coherent","noncoherent"]
     max_paths: int                      # ≤ 目标 capabilities.max_paths
-    velocity_mps: Vec3 | None           # 几何多普勒（可选，《T1-05》§5）
+    velocity_tx_mps: Vec3 | None = None # 几何多普勒 fallback 重算的双端速度（《T1-05》§5 修订——
+    velocity_rx_mps: Vec3 | None = None #   各自可选、缺省视为静止；Ray.doppler_hz 在场时不参与取值，仅供交叉校验）
     rayleigh: RayleighSpecConfig | None # 衰落边缘统计（可选；功率归一化经 M8 rayleigh_norm_gain，
                                         #   norm_mode: "per_tap"|"total"（默认 per_tap）随本配置显式声明——T2-08 §3.1）
     cluster_phase_seed: int = 0         # ★簇相位兜底种子：GCM/CDL 输入既无 Cluster.phase_rad 也无
@@ -114,7 +115,9 @@ def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 
     R_tx, R_rx = correlation_from_angles(model, model.meta.arrays, lam)  # §4
     R = kron(R_tx, R_rx)
 
-    # 可选：几何多普勒 f_d=(v·k̂_arr)/λ 逐径；瑞利谱 spec（功率归一化交 M8 hook）
+    # 多普勒（《T1-05》§5 修订链）：Ray.doppler_hz 在场（上游 DOPPLER 列，v1.2）→ 直接透传，量化合并时
+    # 功率加权聚合入 Tap.doppler_hz（T2-04 §5）；缺失且给 velocity_tx/rx_mps → 双端投影重算
+    # f_d=(f_c/c)(v_TX·k̂_TX−v_RX·k̂_RX)（旧单端 v·k̂/λ 为 RX-only 特例）；再缺 → default。瑞利谱 spec（归一化交 M8）
     apply_doppler_and_rayleigh(taps, cfg, lam)
 
     tdl = assemble_tdl_model(model, taps, correlation=(R_tx,R_rx,R), reduced_from=model.id)
@@ -191,7 +194,7 @@ class ATimeVaryingSynthesizer:      # stub：接口冻结，不实现
 | **共享基准** | 两信道对功率比已知的 fixture | 归一化后相对功率保持（非各自归 1）（要点 2） |
 | **两模式一致性** | 远场平面波 fixture 同时构造 per_element_pair 真值与 single_reference 合成 | 两者 taps/R 偏差 ≤ 容差；近场 fixture 允许偏离并在报告注记 |
 | **保真闭环** | verify_fidelity：理想 fixture err<1e-10；量化/截断后 err 单调合理 | 阈值与单调性 |
-| **多普勒** | velocity 注入：f_d = v·k̂/λ 逐径解析对照 | 数值一致 |
+| **多普勒** | ①上游 Ray.doppler_hz 透传+聚合对照 ②velocity_tx/rx 双端投影重算解析对照（单端为 RX-only 特例） | 数值一致；两来源优先级正确（列在场不重算） |
 | **A 档守卫** | mode=A × RFSOC_CAPS | CapabilityError，零副作用 |
 | **空信道对** | 某 io 全径被量化丢弃 | 空 taps + 计数，整体不失败 |
 

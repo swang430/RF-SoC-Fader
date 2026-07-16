@@ -74,9 +74,13 @@ Meta {
                angle:"deg", frequency:"Hz" }        # 固定约定，规范强制
   angle_convention : { azimuth:"phi_deg[0..360)",
                        zenith:"theta_deg[0=+Z, 90=水平]" }   # 天顶角
-  arrays   : { tx: AntennaArray, rx: AntennaArray }  # 自包含，相关性所依
-  port_map : PortMap               # ★v1.1（升级项①）：阵元↔设备端口的完整映射一等化——
+  arrays?  : { tx: AntennaArray, rx: AntennaArray }  # 自包含，相关性所依——★按 level 限定：
+                                   #   level ∈ {RT,GCM,CDL} 必填（导向/身份解析/相关性所依）；
+                                   #   level=TDL 可缺省（定表直通无阵列语义——引擎 TDL-x 产出仍自带）
+  port_map? : PortMap              # ★v1.1（升级项①）：阵元↔设备端口的完整映射一等化——
                                    #   置于 Meta 级（跨 tx/rx 的成对语义 + link_mode 无法归属单侧阵列）；
+                                   #   ★按 level 限定：level ∈ {RT,GCM,CDL} 必填（M5 退化消费面）；
+                                   #   level=TDL 可缺省（信道映射已固化在 channels[].addr）。
                                    #   v1.0 的 AntennaArray.port_map(int[]) 废止（迁移见 §10）
 }
 

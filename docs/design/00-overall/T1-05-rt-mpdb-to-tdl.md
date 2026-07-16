@@ -102,9 +102,9 @@ def import_mpdb_to_canonical(source, array_geometry, cfg) -> CanonicalChannelMod
 
 - **多普勒来源与优先级**（2026-07-16 修订：MPDB 手册 v1.1/HyperRT v3.2.6 起 CHANNEL 有逐径 `DOPPLER` 列）：
   0. **上游 DOPPLER 列直读（最优先）**：HyperRT ≥3.2.6 在 RT 求解后按 `f_d = (f_c/c)(v_TX·k̂_TX − v_RX·k̂_RX)` 解析计算逐径多普勒（**双端投影**，LOS/NLOS 均成立、散射体静止假设）——列在场即零换算（Hz）直读入 `Ray.doppler_hz`（《T1-03c》§2，v1.2）；退化到 TDL 时 bin 内按**功率加权线性平均**聚合入 `Tap.doppler_hz`（T2-04 §5，与手册 POWER_WEIGHTED_MEAN_DOPPLER 同口径）。上游解析值优于平台从量化后角度重建 k̂ 再投影。
-  1. **默认 0**（B 档准静态回放，`time.mode=static`——无列且无 velocity）。
-  2. **平台几何重算（fallback）**：列缺失且给 `velocity_tx`/`velocity_rx`（各自可选，缺省视为静止——与上游生成语义一致）时由角度+双端速度重算——公式与上游同式（双端投影；旧文单端 `f_d=(v·k̂)/λ` 是 RX-only 特例，`λ=c/f_c`）。列与速度矢量同在 → **列优先**，冗余一致性校验（偏差超容差告警——双源纪律同 portmap，T2-04 §4）。
-  3. **多快照序列**：多个 MPDB 时刻 → `time.mode=time_varying`，由相位/位置演化估多普勒（A 档时间维前提）；逐快照 DOPPLER 列同样按 (0) 直读。
+  1. **平台几何重算（fallback）**：列缺失且给 `velocity_tx`/`velocity_rx`（各自可选，缺省视为静止——与上游生成语义一致）时由角度+双端速度重算——公式与上游同式（双端投影；旧文单端 `f_d=(v·k̂)/λ` 是 RX-only 特例，`λ=c/f_c`）。列与速度矢量同在 → **列优先**，冗余一致性校验（偏差超容差告警——双源纪律同 portmap，T2-04 §4）。
+  2. **默认 0（末位兜底）**：无列且无速度矢量（B 档准静态回放，`time.mode=static`）。
+  3. **多快照序列（时间维选项，与 0–2 正交）**：多个 MPDB 时刻 → `time.mode=time_varying`，由相位/位置演化估多普勒（A 档时间维前提）；逐快照的单快照取值仍按 0→1→2 优先级链。
 - 本期 P1 落 (0)/(1)/(2)；(3) 随 A 档推进（见《06》《13》）。上游 `MAX_ABS_DOPPLER` 聚合是采样充分性校验（《T1-15》Q0 裁定 1）对 MPDB 源的 **f_d_max 权威来源**。多快照/轨迹的**设计基线已立**（跨快照跟踪/槽位稳定/两档出口《T1-15》Q2；B+ 参数流式播放《T1-15》§7）。
 
 ---

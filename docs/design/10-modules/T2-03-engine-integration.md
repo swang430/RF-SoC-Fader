@@ -49,8 +49,9 @@ GenerateRequest = {
              los: "auto"|"force_los"|"force_nlos",   #   （d_2D/d_3D、h_BS/h_UT 由两端坐标导出；auto=按 LOS 概率
              o2i: {model:"low"|"high",               #   模型抽样，seed 治下）；o2i=建筑穿透（38.901 §7.4.3），
                    d2d_in_m: float} | None           #   None=室外。坐标为世界系：arrays 元素坐标是阵列局部系，
-            } | None,                                #   本字段即两端阵列参考点落位（schema 升版②前的世界系
-                                                     #   口径）；CDL-x/TDL-x 定表场景忽略本字段
+            } | None,                                #   本字段即两端阵列参考点落位——引擎请求的链路几何契约
+                                                     #   （schema v1.1 起 arrays 亦有 frame/origin_m，但引擎
+                                                     #   请求仍以本字段为几何来源）；CDL-x/TDL-x 定表场景忽略
   mobility: {speed_mps, direction_deg} | None,
   lsp_mode: "random" | "median",                     # median=确定性 LSP（可重复测试，引擎已支持）
   delay_spread_s: float | None,                      # ★TDL-x/CDL-x 必填：RMS 时延扩展（缩放 delay_norm，《T1-03c》§5.4）
@@ -84,12 +85,12 @@ GenerateResult = {
 ```python
 class ChannelEngineClient:
     async def generate(self, req: GenerateRequest, portmap: PortMap) -> tuple[ChannelModel, EngineReport]:
-        # ★portmap 与 M4 同源同格式：持久化入 provenance（M5 前置校验要求）并用于 want_cir 信道键入
+        # ★portmap 与 M4 同源同格式：直写 Meta.port_map（v1.1 一等字段，M5 消费面）并用于 want_cir 信道键入
         self._check_version_compat()                       # /v1/version：api_version 兼容范围校验，不符拒
         job_id = (await self._post("/v1/jobs", req, timeout=SUBMIT_TIMEOUT))["job_id"]   # ★解包，勿用整响应
         await self._poll_until_done(job_id, timeout=JOB_TIMEOUT)         # 指数退避轮询（仅 status）
         res = await self._get_json(f"/v1/jobs/{job_id}/result")          # ★结果从 /result 端点取（契约分离）
-        model = to_canonical(res, req, portmap)             # ↓转换规则（portmap 入 provenance）
+        model = to_canonical(res, req, portmap)             # ↓转换规则（portmap 直写 Meta.port_map，v1.1）
         if req.want_cir:
             cir = await self._get_npz(f"/v1/jobs/{job_id}/cir")
             attach_cir(model, cir)                          # gain_series 内联 / cir_ref 外置（10MB 规则，《T1-03c》§7）
@@ -100,12 +101,12 @@ def to_canonical(res, req, portmap) -> ChannelModel:
     # TDL-x → level="TDL"：res.taps(delay_norm×req.delay_spread_s→delay_s, power_db→线性, 谱型→rayleigh_spec,
     #         复增益 gain=sqrt(power_linear)·e^{j·phase_rad}) 直落 channels[].taps
     # clusters → Environment.links[].clusters[]（字段一一对应：delay_s/power_linear/角度[天顶]/xpr_db/k_factor）
-    #   ★簇初相 phase_rad：冻结版 Cluster 无此字段（升版打包项③，T2-04 §8-5）——升版落地前由本函数
-    #   把逐链路相位数组写入 provenance.import_config["cluster_phases"]（{link: [phase_rad×N簇]}，
-    #   簇序=引擎输出序），作 T2-05 cluster_phase 的过渡载体（仅存请求会把结果相位丢失）；
-    #   升版后直写 Cluster.phase_rad、载体字段废弃
+    #   ★簇初相：schema v1.1 起 Cluster.phase_rad 为一等字段（升级项③已落地）——本函数**直写该字段**，
+    #   provenance.import_config["cluster_phases"] 过渡载体不再写入（v1.0 旧数据读侧兼容由 M10
+    #   迁移钩子回填，T1-03c §10；T2-05 cluster_phase 优先级①即读本字段）
     # ★want_cir → level="TDL" + realization="CIR"：引擎 CIR 本就是逐端口对实现——
-    #   按 **portmap 入参**（generate 的完整校验版，勿用 req.arrays.port_map 的 int[] 投影）
+    #   按 **portmap 入参**（generate 的完整校验版——v1.1 起 schema 的 Meta.port_map 即此完整结构，
+    #   AntennaArray 不再承载映射、int[] 投影歧义不复存在）
     #   键入 channels[(in,out)].taps.gain_series/cir_ref（10MB 规则），
     #   不产 environment（schema 中 environment/channels 按 level 互斥，CIR 载荷只挂 channels）；
     #   统计描述(lsps/clusters)入 provenance 供溯源
@@ -114,7 +115,8 @@ def to_canonical(res, req, portmap) -> ChannelModel:
     #   import_config:{**req 剔除 client_key, "portmap": serialize(portmap)}}
     #   ——★client_key 是传输层幂等键（逐次提交新 UUID），不属物理配置：若入 provenance，
     #   同一物理配置两次生成的 provenance 将不可判等（破坏可复现比对与回归判等），故剔除；
-    #   seed 与 portmap 均入 provenance（可复现 + M5 前置校验，与 M4 对称）
+    #   seed 入 provenance（可复现）；portmap 直写 Meta.port_map（v1.1 一等字段，M5 消费面）——
+    #   provenance 内副本仅溯源与 v1.0 兼容，与 M4 对称
 ```
 
 - **两源统一兑现**：产出与 M4 同一 schema——GCM/CDL 模型交 **M5** 沿退化链降到 TDL（**M5 契约随本篇修订为接受 level∈{RT,GCM,CDL}**，簇路径见《T2-05》§2/§3 修订——原 RT-only 契约无法消费引擎产物）；TDL-x 直落 `channels[].taps`；CIR 交 AscCirBackend。

@@ -40,8 +40,8 @@ registry = {
                       #   同一缩放语义，CDL 定表同样需要）；phase_seed（默认 0）——确定性合成 Tap
                       #   初相（gain=√P·e^{jφ}，canonical Tap 要求复增益，与 T2-03 taps.phase_rad
                       #   同思想）。CDL 定表另随请求携 arrays+portmap（reader 写入 meta.arrays 与
-                      #   provenance.import_config["portmap"]——冻结 Provenance 仅有 import_config 字段，
-                      #   与 M4/M3 同一落位——M5 退化前置要求）；TDL 定表另随请求携
+                      #   Meta.port_map——schema v1.1 一等字段、与 M4/M3 同一落位（provenance 副本
+                      #   仅溯源与 v1.0 兼容）——M5 退化前置要求）；TDL 定表另随请求携
                       #   栅格拓扑（grid.topology 为 schema 必填，默认 8*8）与目标信道对列表
                       #   （默认 [(0,0)]，须 ⊆ 拓扑有效对——taps 落 channels[(in,out)]、grid 同步：
                       #   TDL 不经 M5、直通 M2 渲染按信道对键取数，无键无处落）。
@@ -58,7 +58,7 @@ def sniff(data, meta=None) -> kind
 ```
 
 - **版本化读写（版本主权分两类）**：**内部格式**在载荷内携带 `schema_version`，解码端**向前兼容读**（旧版数据 → 迁移钩子链升到当前版）、编码端只写当前版；**镜像格式载荷不加任何自有字段**（键集/头由源契约固定——NPZ 无 schema_version 键、asc 无额外头，设备/引擎按源契约直接消费），其版本记在 M10 **元数据边车/注册条目**上（与 sha256 边车同层，不进载荷）。
-  - **内部格式**（model-json / report-json / frameplan-bin / **cdl-tdl-table-json**——定表 JSON 的 schema 归 T1-03c 平台自有）：M10 迁移钩子演进——T1-03c v1.1 升版（PortMap/origin/phase_rad 打包项）落地时，`model-json/v1 → v1.1` 钩子在此实现，旧库存模型无需重导；用户手写的定表裸文件（无 meta）按 sniff 裸文件规则处理（族+当前版显式假定，§上）。
+  - **内部格式**（model-json / report-json / frameplan-bin / **cdl-tdl-table-json**——定表 JSON 的 schema 归 T1-03c 平台自有）：M10 迁移钩子演进——**T1-03c v1.1 已落地（2026-07-16 升版 PR）**：`model-json/v1 → v1.1` 钩子按 T1-03c §10 迁移规则实现（①portmap 升格 Meta.port_map ②frame 补 world ③phase_rad 从载体回填），旧库存模型无需重导；用户手写的定表裸文件（无 meta）按 sniff 裸文件规则处理（族+当前版显式假定，§上）。
   - **线缆契约镜像格式**（npz-cir 随 T2-03 §2、asc 随《T1-08》后端契约）：**布局主权在源契约，M10 只镜像注册、不独立演进**——升版=源契约先升（如引擎 v2 端点/键），M10 跟随注册新条目；黄金测试对照的就是源契约（§8）。
 - **完整性**：所有落盘产物带 sha256 边车（读取时校验，损坏显式报错不静默截断）。
 
@@ -88,7 +88,7 @@ class BlobStore:
     def pin(ref, owner) / unpin(ref, owner)              # 引用计数：scenario/session/model 持有者登记
 ```
 
-- **10MB 规则的唯一落点**（《T1-03c》§7）：判定量=**内联形态的实际体量**——即 `gain_series` 按 T1-03c JSON 形态（`(re,im)` 对）序列化后计入 model-json 的字节增量；**不按 npz-cir 字节判**（NPZ 是外置格式且更紧凑，用它判定会低估内联文档体量、漏触发外置——阈值语义所指本就是内联文档大小）。≤阈值：CIR **保持冻结 schema 的原字段形态内联**（逐 `Tap.gain_series: Complex[n_snapshots]`，无 M10 中间表示）；>阈值：**按 pair 切分为单对 NPZ**（仍 `npz-cir/v1`，n_pairs=1）逐一落 blob，`channels[(in,out)].cir_ref = BlobRef`——引用挂逐 Channel 且**保持冻结 schema 的单一 BlobRef 类型**（整卷共享+`(ref, index)` 复合引用需改 schema 字段类型，违反冻结基线，不取；内容寻址下切分不损去重语义），`gain_series` 不承载。阈值为 M10 常量、判定 helper 唯一（`attach_cir` 调用处），全平台不散落第二处。**`RayleighSpec.coeffs` 大载荷**：《T1-03c》§10 的 10MB 规则**同样强制**（「256 系数×多径×多信道支持外置引用，JSON 只存元数据+引用」，且 blob 格式明文归 M10 定）——但 §5 类型无 coeffs_ref 字段，外置在 **model-json codec 序列化层**实现：编码时按**文档级聚合体量**判定——单个 coeffs 恒为 `Complex[256]`≈4KB **永不单独超阈**（10MB 压力来自 256 系数×径×信道的聚合，逐数组判定永不触发、规则形同虚设）：全部 coeffs 字段的聚合 JSON 增量超阈 → **所有** coeffs 统一**原位替换**为 `{"$blob": BlobRef}` 信封（单一开关，不留部分内联/部分外置的混合态；数据逐字段落 `.npy`，内容寻址自然去重），解码时透明回填为 `Complex[256]`——内存模型始终保持 schema 原字段形态、不新增 schema 字段（§10 授权 M10 定存储表示；`$blob` 信封是 model-json/v1 的编码约定，内部格式版本主权在 M10，§2）。T1-03c v1.1 打包项④相应改为**复评 coeffs_ref 一等字段**（codec 层已满足 §10 强制性，字段化属可见性增强、非功能必需——T2-04 §8-5）。
+- **10MB 规则的唯一落点**（《T1-03c》§7）：判定量=**内联形态的实际体量**——即 `gain_series` 按 T1-03c JSON 形态（`(re,im)` 对）序列化后计入 model-json 的字节增量；**不按 npz-cir 字节判**（NPZ 是外置格式且更紧凑，用它判定会低估内联文档体量、漏触发外置——阈值语义所指本就是内联文档大小）。≤阈值：CIR **保持冻结 schema 的原字段形态内联**（逐 `Tap.gain_series: Complex[n_snapshots]`，无 M10 中间表示）；>阈值：**按 pair 切分为单对 NPZ**（仍 `npz-cir/v1`，n_pairs=1）逐一落 blob，`channels[(in,out)].cir_ref = BlobRef`——引用挂逐 Channel 且**保持冻结 schema 的单一 BlobRef 类型**（整卷共享+`(ref, index)` 复合引用需改 schema 字段类型，违反冻结基线，不取；内容寻址下切分不损去重语义），`gain_series` 不承载。阈值为 M10 常量、判定 helper 唯一（`attach_cir` 调用处），全平台不散落第二处。**`RayleighSpec.coeffs` 大载荷**：《T1-03c》§10 的 10MB 规则**同样强制**（「256 系数×多径×多信道支持外置引用，JSON 只存元数据+引用」，且 blob 格式明文归 M10 定）——但 §5 类型无 coeffs_ref 字段，外置在 **model-json codec 序列化层**实现：编码时按**文档级聚合体量**判定——单个 coeffs 恒为 `Complex[256]`≈4KB **永不单独超阈**（10MB 压力来自 256 系数×径×信道的聚合，逐数组判定永不触发、规则形同虚设）：全部 coeffs 字段的聚合 JSON 增量超阈 → **所有** coeffs 统一**原位替换**为 `{"$blob": BlobRef}` 信封（单一开关，不留部分内联/部分外置的混合态；数据逐字段落 `.npy`，内容寻址自然去重），解码时透明回填为 `Complex[256]`——内存模型始终保持 schema 原字段形态、不新增 schema 字段（§10 授权 M10 定存储表示；`$blob` 信封是 model-json/v1 的编码约定，内部格式版本主权在 M10，§2）。复评结论已随 v1.1 落定：**不增设一等字段**（T1-03c §10 ④——codec 层已满足 §10 强制性）。
 - **GC**：引用计数归零的 blob 进延迟回收队列（宽限期防误删——审计留痕）；`pin/unpin` 随持有者生命周期由 repository 层自动维护，业务不手工管理。
 - .asc 产物与 FramePlan 存档同走 blob（M7 `/artifact` 端点经 `open_stream` 流式直出）。
 
@@ -151,4 +151,4 @@ class BlobStore:
 - 六类 codec 往返黄金 + NPZ/asc 与源契约（NPZ→T2-03 §2；asc→《T1-08》+ChannelEgine 样例）逐键核对全绿。
 - 乐观锁/append-only/内容寻址/blob 生命周期测试全绿。
 - 原子写注入测试与 T2-06 重启恢复用例联合通过（数据面自洽）。
-- T1-03c v1.1 迁移钩子演练：v1 样本无损升级（升版 PR 的存储侧预案）。
+- T1-03c v1.0→v1.1 迁移钩子：v1.0 样本无损升级（含 portmap 升格/frame 补默认/phase_rad 回填三规则黄金用例）。

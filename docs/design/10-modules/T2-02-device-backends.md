@@ -31,15 +31,23 @@ class BackendCapabilities:
     if_freq_max_hz: float | None     # None = 无频段约束
     polarization: str
     multi_frame_atomic: bool
+    # ★B+ 参数流式播放三项（《T1-15》§7 D7）——glitch-free 微事务流的硬件前提
+    supports_param_streaming: bool   # 微事务参数流式生效（B+ 播放面）
+    tweak_glitch_free: bool          # tweak 写入瞬间无输出毛刺/瞬断（H2/H3）
+    doppler_phase_accumulate: bool   # 改写 ID4 不清相位积分器（H1）
 
 RFSOC_CAPS = BackendCapabilities(   # 当前 RF-SoC 设备（《T1-12》#1/#5/N4）
     supports_time_varying=False, supports_cir=False,
     max_paths=24, grid="8x8", if_freq_max_hz=2.6e9,
-    polarization="xpr_conducted", multi_frame_atomic=False)
+    polarization="xpr_conducted", multi_frame_atomic=False,
+    supports_param_streaming=False, tweak_glitch_free=False,      # 待硬件确认 H1–H4（《T1-12》§8b）——
+    doppler_phase_accumulate=False)                               #   确认前 B+ 播放被能力门拒（《T1-15》§7）
 ASC_CAPS = BackendCapabilities(     # .asc 文件后端：无设备物理限制
     supports_time_varying=True, supports_cir=True,
     max_paths=None, grid=None, if_freq_max_hz=None,
-    polarization="full", multi_frame_atomic=True)
+    polarization="full", multi_frame_atomic=True,
+    supports_param_streaming=False, tweak_glitch_free=False,      # 文件后端无运行时流式概念——
+    doppler_phase_accumulate=False)                               #   A 档时变走 CIR 载荷，不经参数流
 
 class DeviceBackend(Protocol):
     capabilities: BackendCapabilities
@@ -128,7 +136,7 @@ def plan_frames(groups: list[Group], budget=4000) -> FramePlan:
 
 ## 4. RFSoCBackend.apply：事务状态机（核心）
 
-无跨帧原子性 → 事务由上位机补偿（《T1-11》§1）。**回滚基线 = RESET**（协议无参数读回，《T1-A1》§6）。
+无跨帧原子性 → 事务由上位机补偿（《T1-11》§1）。**回滚基线 = RESET**（协议无参数读回，《T1-A1》§6）。**跨下发连续性契约**（《T1-15》Q0 裁定 2）：每次 apply/re-apply 视同信道重配置——平台不承诺相位/衰落状态跨下发保持（硬件实际行为属实测认知项 H5，《T1-12》§8b）。
 
 ```
 IDLE ──apply(plan)──► APPLYING ──全帧 echo 通过──► VERIFYING ──遥测通过──► COMMITTED
@@ -254,7 +262,7 @@ async def readback() -> None
 ---
 
 ## 9. 开放问题
-1. **RESET 残留**（瑞利系数/输出衰减不被复位）与回滚语义的对外表述——是否需要「深度回滚」（显式写默认值覆盖）选项。
+1. ~~RESET 残留与「深度回滚」选项~~ → **已闭合：不设深度回滚**——残留两项（瑞利系数/输出衰减）在 RESET 后因使能全关而**惰性**（无使能不产生射频效果，§3 G2 注），且下次 apply 的 G1/G4 对使用面无条件覆盖写（G4 恒 ENABLE+COEFFS 成对），残留不渗入新配置；对外语义即 §4「回滚=回到安全基线，不承诺字节级还原」。衰落过程状态是否跨重写保持属另一问题（《T1-15》D2 → 《T1-12》§8b H5 实测认知项）。
 2. **遥测竞态**：apply 期间周期遥测与单次请求（ID14=0x03）并存时的归属判定（以请求后首帧为准？）——实现时与设备实测。
 3. **逐帧确认的吞吐**：64 信道满配多帧串行 RTT 累积；若实测过慢，再评估流水化（需设备回显顺序保证，硬件确认）。
 4. 帧间是否需要 pacing（设备处理间隔）——实测定。

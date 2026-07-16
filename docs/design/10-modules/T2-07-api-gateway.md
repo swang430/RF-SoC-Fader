@@ -43,10 +43,11 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `/channels` | GET/PATCH | **《T1-04》原路径兼容别名**：映射到当前唯一**持设备的 ACTIVE 会话**（backend=rfsoc）——asc 会话（device_id=None，写文件即 committed）不参与判定（tweak 本为 rfsoc 限定，T2-06 §4bis）；候选 0 个或 ≥2 个 → 409 指明改用嵌套路径 | 同上 | 同步 |
 | `/sessions/{id}/close` | POST `{release}` | M6 close（DIRTY 强制 reset 由 M6 裁决，网关只透传） | control | 同步 |
 | `/sessions/{id}/recover` | POST | M6 `submit_recover`（RESET+重 apply，任务在 M6 运行器内） | control | 202 |
-| `/telemetry` | GET | M8 快照服务 | read | 同步 |
+| `/telemetry` | GET | M8 快照服务——**裁决 T2-08 §6 的「204/404」二择**：device_id 已注册但暂无遥测帧 → **204 No Content**（SDK 映 None，T2-09 §3）；device_id 未注册 → 404 | read | 同步 |
 | `/telemetry/stream` | GET `?last_event_id=` | M8 订阅（SSE；`Last-Event-ID` 窗内续传，窗外流内首发 `resync` 事件指示快照重拉——EventSource 无非 200 语义）。**查询参数 `last_event_id` 与同名头等价**（头优先）——浏览器原生 EventSource 无法自设任意头：在线重连用头（浏览器自动），**回放游标用查询参数**（T2-11 ⑤ 历史回看的可实现面） | read | SSE |
 
-- **长耗时异步化**（《T1-04》§3 约定）：202 响应体分两类——**会话操作**（resolve/apply/recover）返回 `{session_id, op_id, poll_url}`：`op_id` 来自 M6 提交面 OperationRef（T2-06 §4），`poll_url` 指向 GET `/sessions/{id}`（**Session.state 即进度**，不设独立任务端点）；**导入任务**（POST `/imports`）返回 `{job_id, poll_url}`：`poll_url` 指向 GET `/imports/{job_id}`（job 非会话，无 OperationRef）。同会话在途操作冲突 → M6 OperationInFlight → 409。
+- **长耗时异步化**（《T1-04》§3 约定）：202 响应体分两类——**会话操作**（resolve/apply/recover）返回 `{session_id, op_id, poll_url}`：`op_id` 来自 M6 提交面 OperationRef（T2-06 §4），`poll_url` 指向 GET `/sessions/{id}`（**Session.state 即进度**，不设独立任务端点）；**导入任务**（POST `/imports`）返回 `{job_id, poll_url}`：`poll_url` 指向 GET `/imports/{job_id}`（job 非会话，无 OperationRef）。同会话在途操作冲突 → M6 OperationInFlight → 409（§3 错误表有行，扩展字段携 current_op）。
+- **allowed_ops 词表**（T2-06 §3 状态表的序列化词表，进 OpenAPI schema enum，防三方漂移）：`resolve · apply · dry_run · re-apply · tweak · readback · recover · close`——各词映射到本节端点（dry_run=POST apply?dry_run=true、re-apply=POST apply、tweak=PATCH channels、readback=GET /devices/{id} 的 readback 健康——**无会话级 readback 端点**）；词表演进与 T2-06 状态表同步。
 - **M8 依赖接口先行声明**（同 T2-03 定义引擎侧契约的做法）：M7 消费 `TelemetrySnapshot get_snapshot(device_id)` 与 `AsyncIterator[TelemetryEvent] subscribe(device_id, last_event_id?)`——具体语义 T2-08 为规范。
 
 ---
@@ -60,6 +61,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | :-- | :-- | :-- |
 | 参数校验失败 / ScenarioError / CapabilityError | 422 | field_errors；能力差距+替代出口（M6 能力门原文透传） |
 | DeviceBusy（租约被持有，T2-06） | 409 | holder_session_id |
+| OperationInFlight（同会话在途操作，T2-06 §4） | 409 | current_op={op_id, kind}（客户端可据此续 wait 而非盲重试） |
 | InvalidCloseError / 状态机非法迁移 | 409 | allowed_ops（当前态允许操作表） |
 | scenario 版本冲突（repo 乐观锁） | 409 | current_version |
 | 资源不存在 | 404 | —— |
@@ -160,6 +162,8 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 2. OIDC/多租户配额与隔离（商用部署项；《T1-04》§8-2 与 M6 租约协同已解本期并发问题）。
 3. SCPI 最小子集边界随测试台真实需求收敛（《T1-04》§8-3）。
 4. `/devices` POST/DELETE 启用（P4）时 control scope 是否再细分设备管理权限。
+5. **`/sessions/{id}/playback`（start/stop/status + SSE 进度）——B+ 播放控制端点（保留设计，《T1-15》§7）**：随 M6 PLAYING 子态同批设计；落地前不入 OpenAPI（不广告不可执行操作，同 §2 RESOLVING cancel 先例）；其 status/SSE 进度届时构成对 §2「不设独立任务端点」约定的**受控例外**（随 /v1 合同修订一并裁决）。
+6. 提交类端点的 **`Idempotency-Key`** 头（允许 SDK 安全自动重试 POST）——与 T2-09 §8-3 同项、T2-06 提交面协同，P2 复评（双向锚，防单边台账遗漏）。
 
 ---
 

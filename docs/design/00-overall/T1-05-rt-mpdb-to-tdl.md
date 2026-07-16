@@ -56,6 +56,8 @@ def import_mpdb_to_canonical(source, array_geometry, cfg) -> CanonicalChannelMod
             coh   = sum(grp.H)                       # 相干叠加（复）
             ncoh  = sum(abs(grp.H)**2)               # 非相干功率
             power = ncoh if cfg.power_mode=="noncoherent" else abs(coh)**2
+            # ★对齐注记（《T1-15》D6）：合并后 tap 复增益恒为相干叠加 coh（保相位）——
+            #   power_mode 只影响排序/统计功率，模块级精化以《T2-04》§5 为准
             taps.append(Tap(
                 delay_s   = code * PATH_DELAY_UNIT_NS * 1e-9,
                 gain      = coh,                     # 复增益（保相位）
@@ -101,7 +103,7 @@ def import_mpdb_to_canonical(source, array_geometry, cfg) -> CanonicalChannelMod
   1. **默认 0**（B 档准静态回放，`time.mode=static`）。
   2. **几何速度注入**：给 TX/RX 速度矢量，由到达角 + 速度算每径多普勒 `f_d = (v·k̂)/λ`。
   3. **多快照序列**：多个 MPDB 时刻 → `time.mode=time_varying`，由相位/位置演化估多普勒（A 档时间维前提）。
-- 本期 P1 落 (1)/(2)；(3) 随 A 档推进（见《06》《13》）。
+- 本期 P1 落 (1)/(2)；(3) 随 A 档推进（见《06》《13》）。多快照/轨迹的**设计基线已立**（跨快照跟踪/槽位稳定/两档出口《T1-15》Q2；B+ 参数流式播放《T1-15》§7）。
 
 ---
 

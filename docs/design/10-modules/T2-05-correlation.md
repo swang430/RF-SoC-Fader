@@ -38,7 +38,8 @@ class SynthesisConfig:
     power_mode: Literal["coherent","noncoherent"]
     max_paths: int                      # ≤ 目标 capabilities.max_paths
     velocity_mps: Vec3 | None           # 几何多普勒（可选，《T1-05》§5）
-    rayleigh: RayleighSpecConfig | None # 衰落边缘统计（可选；功率归一化 hook→M8）
+    rayleigh: RayleighSpecConfig | None # 衰落边缘统计（可选；功率归一化经 M8 rayleigh_norm_gain，
+                                        #   norm_mode: "per_tap"|"total"（默认 per_tap）随本配置显式声明——T2-08 §3.1）
     cluster_phase_seed: int = 0         # ★簇相位兜底种子：GCM/CDL 输入既无 Cluster.phase_rad 也无
                                         #   provenance 载体时（如用户直录 3GPP CDL 定表，表无相位列）
                                         #   按此确定性合成（§3 cluster_phase 优先级③）
@@ -200,7 +201,7 @@ class ATimeVaryingSynthesizer:      # stub：接口冻结，不实现
 1. **Kronecker vs 全相关**：可分离近似的精度边界（《T1-06》§7-4）；FidelityReport 已给量化手段，阈值随场景验收定。
 2. **近场**：single_reference 平面波近似在近场的误差界；建议近场场景一律要求 per_element_pair 输入（导入侧提示归 M4/M11）。
 3. **XPR 来源**：RT 单极化 H 无 XPR 信息，传导模式 Tap.xpr_db 留空/用户配置；HyperRT 极化输出落地后升级（《T2-04》§8-2）。
-4. **瑞利谱与 M8 衔接**：spec 写入时的谱型功率归一化系数由 M8 提供（《T1-12》#2），本篇仅留 hook。
+4. ~~瑞利谱与 M8 衔接~~ → **已由 T2-08 §3.1 规范**：M5 在 apply_doppler_and_rayleigh 内调用 `CalibrationService.rayleigh_norm_gain(taps_coeffs, mode=cfg.rayleigh.norm_mode)`（纯函数，per_tap/total 两模式）；余项=E_ref 实测定标（归 T2-08 §8）。
 
 ## 10. 本篇验收
 - 黄金几何解析例全绿（含顺序纪律与共享基准的可测化验证）。

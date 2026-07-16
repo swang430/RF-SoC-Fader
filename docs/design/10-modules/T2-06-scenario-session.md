@@ -62,7 +62,13 @@ class Session:
     current_op: OperationRef | None           # ★在途异步操作：submit 面受理即置位、终局清空——
                                               #   OperationInFlight 拒并发的判据；轮询方见此知「仍在跑」
     completed_ops: tuple[OpRecord, ...]       # ★终局操作历史（有界，最近 N 条；OpRecord={op_id, kind,
-                                              #   outcome, at, error?, result?}——★终局细节随记录：error=
+                                              #   outcome, at, error?, result?}——★outcome 全集（SDK/GUI 判据词表，
+                                              #   T2-09 §3 消费）：completed | failed | rejected | aborted_by_restart | aborted_by_close
+                                              #   ——completed=操作跑完（apply 类细节在 result.device_state：
+                                              #   committed/rolled_back/dirty）；failed=操作异常终局（resolve 失败等）；
+                                              #   rejected=受理后审计不可用零触达终局（T2-10 §6）；
+                                              #   aborted_by_restart=重启中止（§3）；aborted_by_close=在途 resolve
+                                              #   被会话 close 中止（§3 RESOLVING 行）。★终局细节随记录：error=
                                               #   该操作的结构化错误、result=其 ApplyResult 摘要。会话级
                                               #   last_error/last_apply 会被后续操作覆盖，晚归续等只能从
                                               #   OpRecord 取本操作的失败因/结果）：任务终局时运行器追加——
@@ -111,12 +117,13 @@ class ResolvedArtifacts:
 | 状态 | 含义 | 允许操作 |
 | :-- | :-- | :-- |
 | CREATED | 已绑定 scenario@version × device × backend，未物化 | resolve / apply（auto_resolve：内部先 resolve）/ close |
-| RESOLVING | 编排管线运行中（§4；长耗时异步 job，《T1-04》） | 查询进度（cancel 语义见 §6「RESOLVING cancel」行——取消本地编排、引擎侧联动 T2-03 开放问题 3；REST 无取消端点，**提供前不入 allowed_ops 序列化**，不向客户端广告不可执行的操作） |
+| RESOLVING | 编排管线运行中（§4；长耗时异步 job，《T1-04》） | 查询进度 / close（对在途 resolve 的语义同 §6「RESOLVING cancel」行：放弃本地编排、引擎任务自然过期——close 前先将 current_op 以 `aborted_by_close` 终局（§2 词表值，等待者得到定义内终局），零设备触达直接 CLOSED。cancel 本身仍无 REST 端点，**提供前不入 allowed_ops 序列化**，不向客户端广告不可执行的操作） |
 | READY | 产物就绪（FramePlan/AscFileSet + 报告），设备零触达 | dry_run / apply / close |
 | APPLYING | M2 事务进行中 | 查询进度（同会话禁止并发第二个 apply） |
 | ACTIVE | committed——设备射频输出已按该产物生效 | readback / dry_run（§4 明写 {READY, ACTIVE}——列此保证 allowed_ops 不漏播合法操作）/ tweak（§4bis）/ re-apply / close |
 | DEVICE_DIRTY | M2 返回 dirty：设备状态未知（T2-02 §契约） | recover / close(reset) |
-| RESOLVE_FAILED · CLOSED | 终态（CLOSED 释放设备租约） | —— |
+| RESOLVE_FAILED | 物化失败（last_error 定位，可换 version 新建会话） | close（无租约、零设备触达，直接 CLOSED——不给 close 则僵尸会话不可终结，与图注「close 可自任何非 APPLYING 态进入」一致） |
+| CLOSED | 终态（释放设备租约） | —— |
 
 - **「允许操作」列是对外 `allowed_ops` 的唯一裁决源**：会话 GET（T2-07）把本表当前态的允许操作集序列化为 `allowed_ops` 输出（与 409 错误扩展字段同源）——GUI/SDK **不得自行由 state 推导**可用操作（前端零业务逻辑，T2-11 §1）；tweak 的 rfsoc 限定（§4bis）等后端条件同样折算进裁决。
 
@@ -339,8 +346,9 @@ M7/GUI          M6(Session)              M3/M4/M5                M2(Backend)    
 
 1. 跨设备会话（多机箱级联）的事务一致性——P4 项（《T1-10》开放问题 2），本期单设备会话。
 2. ACTIVE 期间遥测越限（M8 告警）是否自动降幅/回滚——本期只告警不自动动作，安全联动策略实现期与 M8 协同定。
-3. scenario schema 随 T1-03c v1.1 升版的迁移（version 字段已隔离旧数据，预计只加不改；升版 PR 时一并评估）。
+3. ~~scenario schema 随 T1-03c v1.1 升版的迁移~~ → **已闭合（v1.1 已于 2026-07-16 落地）**：scenario 侧变更仅 ImportConfig 新增带默认值的 `frame` 字段（默认 "world"，T2-04 §4）——「只加不改」成立，旧 Scenario 反序列化兼容；旧场景缺 frame 的读入**与 T1-03c §10 迁移规则同口径、不盲补**：`identity_by="position"` → world（v1.0 该模式即强制世界系）；`identity_by="index"` → **拒**（`SchemaMigrationAmbiguous`，要求用户显式声明——v1.0 的 index 模式 local/world 皆可能，默认 world 会静默错标局部几何、导向计算整体错位）。
 4. artifact_cache 的失效策略（caps 变更/固件升级后 digest 变化即自然失效；容量上限实现期定）。
+5. **B+ 播放调度器（保留接口设计，《T1-15》§7 D7）**：会话状态机增 PLAYING 子态；`PlaybackPlan` 预编译（微事务时间表+吞吐校验）与定时调度归本模块；tweak 通道复用为参数流（不 reset/不动使能/不发 ID33）。随 H1–H4 硬件确认排期（《T1-12》§8b），未确认前能力门拒（不入 allowed_ops 序列化，同 RESOLVING cancel 先例）。
 
 ---
 

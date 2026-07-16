@@ -269,6 +269,7 @@ TimeAxis {
 ```
 - `static`（B 档默认）：`channels[].taps[].gain` 为标量复数。
 - `time_varying`（A 档 / 移动性）：抽头增益随 `snapshots` 变化——`realization=CIR`，抽头增益为**随时刻的复序列**（`gain_series : Complex[n_snapshots]`），对应 `.asc` 的逐时刻 tap 数据。
+- **生灭表示（语义附注，《T1-15》D3）**：time_varying 下 tap 槽位固定（`gain_series` 定长），路径生灭以**增益包络**表达——birth 起零 ramp-up、death 归零后保持 0；斜坡由生成方负责（防频谱溅射），schema 不增字段。
 - **内联 vs 外置（阈值 = 10 MB）**：序列化后 **≤10 MB 内联**进 JSON；**>10 MB 外置** blob（JSON 只存元数据 + 引用句柄）。见 §10。
 
 ---
@@ -355,6 +356,8 @@ Provenance {
 3. **复数序列化**（3GPP 无标准）——内部表示用直角 (re,im)（计算友好）；`{re,im}` vs `[re,im]` 由 M10 定；导出格式(.asc 分列 / PropSim `a+bi` / 设备 amp+phase)由各 codec 定，非 schema 统一（§10）。
 4. ~~CIR 外置存储边界~~ → **已定：10 MB**（序列化 ≤10 MB 内联，>10 MB 外置 blob，§7/§10）；blob 格式归 M10。
 5. ~~`port_map`（阵元↔端口）承载形态~~ → **已定（v1.1 升级项①）**：完整 PortMap 结构一等化于 `Meta.port_map`（§4）；校验规则（V1–V7）与身份解析仍归 M4（T2-04 §3）。
+6. **time_varying 载荷的 tap 上限（升版议题，《T1-15》Q2 裁定 2-①）**：现 `taps ≤24` 无条件（§5.2/§9），但 24 是 RF-SoC 设备约束、文件后端无上限（`ASC_CAPS.max_paths=None`）——议题：time_varying 载荷的 tap 上限改由后端 capabilities 裁决（static 维持 ≤24）；放宽落地前，实现遇超 24 的 A 档模型显式拒绝（不静默截断）。
+7. **参数轨道一等化（v1.2 观察项，《T1-15》D8）**：B+ 播放的慢尺度参数轨迹现以编排层 `PlaybackPlan` 承载（schema 不动）；若实测后需要模型内持久化，再评估 `Tap.delay_series/power_series/doppler_series`。
 
 ## 13. 本篇验收
 - schema 能**无损承载** MPDB 全部 RT 数据（§2 映射无丢失）。

@@ -42,7 +42,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `/sessions/{id}/close` | POST `{release}` | M6 close（DIRTY 强制 reset 由 M6 裁决，网关只透传） | control | 同步 |
 | `/sessions/{id}/recover` | POST | M6 `submit_recover`（RESET+重 apply，任务在 M6 运行器内） | control | 202 |
 | `/telemetry` | GET | M8 快照服务 | read | 同步 |
-| `/telemetry/stream` | GET | M8 订阅（SSE；`Last-Event-ID` 窗内续传，窗外流内首发 `resync` 事件指示快照重拉——EventSource 无非 200 语义） | read | SSE |
+| `/telemetry/stream` | GET `?last_event_id=` | M8 订阅（SSE；`Last-Event-ID` 窗内续传，窗外流内首发 `resync` 事件指示快照重拉——EventSource 无非 200 语义）。**查询参数 `last_event_id` 与同名头等价**（头优先）——浏览器原生 EventSource 无法自设任意头：在线重连用头（浏览器自动），**回放游标用查询参数**（T2-11 ⑤ 历史回看的可实现面） | read | SSE |
 
 - **长耗时异步化**（《T1-04》§3 约定）：202 响应体分两类——**会话操作**（resolve/apply/recover）返回 `{session_id, op_id, poll_url}`：`op_id` 来自 M6 提交面 OperationRef（T2-06 §4），`poll_url` 指向 GET `/sessions/{id}`（**Session.state 即进度**，不设独立任务端点）；**导入任务**（POST `/imports`）返回 `{job_id, poll_url}`：`poll_url` 指向 GET `/imports/{job_id}`（job 非会话，无 OperationRef）。同会话在途操作冲突 → M6 OperationInFlight → 409。
 - **M8 依赖接口先行声明**（同 T2-03 定义引擎侧契约的做法）：M7 消费 `TelemetrySnapshot get_snapshot(device_id)` 与 `AsyncIterator[TelemetryEvent] subscribe(device_id, last_event_id?)`——具体语义 T2-08 为规范。

@@ -42,6 +42,9 @@ class SynthesisConfig:
                                         #   排在必填 rayleigh 前会 TypeError；Ray.doppler_hz 在场时仅供交叉校验）
     rayleigh: RayleighSpecConfig | None # 衰落边缘统计（可选；功率归一化经 M8 rayleigh_norm_gain，
                                         #   norm_mode: "per_tap"|"total"（默认 per_tap）随本配置显式声明——T2-08 §3.1）
+    default_doppler_hz: float = 0.0     # ★多普勒末位兜底（《T1-05》§5 链 (2)）——doppler_of() 在
+                                        #   Ray.doppler_hz 缺失且未给 velocity_tx/rx 时取此值（与 M4
+                                        #   ImportConfig.default_doppler_hz 同语义，defaulted 字段区合法排位）
     cluster_phase_seed: int = 0         # ★簇相位兜底种子：GCM/CDL 输入既无 Cluster.phase_rad 也无
                                         #   provenance 载体时（如用户直录 3GPP CDL 定表，表无相位列）
                                         #   按此确定性合成（§3 cluster_phase 优先级③）

@@ -1,7 +1,7 @@
 # 03c · 信道 Schema（canonical model 规范契约）
 
 > 第一册《总体设计》· 第 3c 篇（枢纽契约的字段级规范）
-> 状态：**v1.1**（2026-07-16 升版）· **规范性(normative)**——冻结基线 v1.0（tag: design-t1-v1.0）后**首次按升版纪律走 PR 升版**（第二册评审累积的打包四项：①完整 PortMap 一等化 ②阵列坐标系声明 ③簇初相 ④coeffs 外置复评——变更明细与 v1.0→v1.1 迁移规则见 §10）
+> 状态：**v1.2**（2026-07-16 二次升版：MPDB 手册 v1.1/HyperRT v3.2.6 新增逐径 DOPPLER 列 → `Ray.doppler_hz?` 可选字段）· **规范性(normative)**——冻结基线 v1.0（tag: design-t1-v1.0）后按升版纪律走 PR 升版（v1.1：第二册评审打包四项——①完整 PortMap 一等化 ②阵列坐标系声明 ③簇初相 ④coeffs 外置复评；变更明细与迁移规则见 §10）
 > 前置：《03-architecture》§4、《03b-model-hierarchy》；被 L1/L2/L3/L4、两上游源、两后端共同依赖
 
 ---
@@ -34,6 +34,7 @@
 | `CHANNEL.H[复]` | → | `Ray.gain` | 复增益 |
 | `CHANNEL.AOA/ZOA` | → | `Ray.aoa_az_deg / aoa_zen_deg` | 到达角(方位+天顶) |
 | `CHANNEL.AOD/ZOD` | → | `Ray.aod_az_deg / aod_zen_deg` | 离去角 |
+| `CHANNEL.DOPPLER`（v3.2.6+） | → | `Ray.doppler_hz?`（v1.2） | 逐径多普勒（Hz），**同单位无损**；旧库无列 → 字段缺省 |
 | `CHANNEL.CHANNEL_TYPE` | → | `Ray.type` | 0=LoS |
 | （无相关/损伤/设备概念） | | 退化链下游产生 | 导入时为空 |
 
@@ -46,7 +47,7 @@
 
 ```
 ChannelModel {
-  schema_version : string          # 当前 "1.1"（编码端只写当前版；v1.0 旧数据经迁移钩子向前兼容读，§10）
+  schema_version : string          # 当前 "1.2"（编码端只写当前版；旧数据经迁移钩子链向前兼容读，§10）
   id             : string          # 模型唯一标识
   level          : RT | GCM | CDL | TDL          # 表示层级（《03b》）
   realization    : none | CIR                    # 正交时变实现
@@ -141,6 +142,9 @@ Ray {                                   # RT 层
   gain         : Complex | PolMatrix    # 复增益（标量单极化 / 2×2 极化矩阵）
   aoa_az_deg, aoa_zen_deg : float       # 到达角（方位/天顶）
   aod_az_deg, aod_zen_deg : float       # 离去角
+  doppler_hz?  : float                  # ★v1.2：逐径多普勒（Hz）——HyperRT ≥3.2.6 的 DOPPLER 列直读
+                                        #   （上游按 f_d=(f_c/c)(v_TX·k̂_TX−v_RX·k̂_RX) 解析计算，双端投影）；
+                                        #   旧数据缺省。消费优先级（列>velocity 重算>默认 0）见《T1-05》§5
   type         : int                    # 0=LoS, >0=反射/绕射
 }
 
@@ -316,6 +320,7 @@ Provenance {
 | `max_doppler_hz` | float | Hz | ≥0 |
 | `coeffs` | complex[256] | — | 频域滤波系数 |
 | `phase_rad`（v1.1） | float | 弧度 | 簇初相（可选；缺省时消费端种子兜底） |
+| `Ray.doppler_hz`（v1.2） | float | Hz | 可选；上游 DOPPLER 列直读，缺省=无上游值（消费 fallback 链《T1-05》§5） |
 | `frame`（v1.1） | enum | — | world \| local（缺省 world） |
 | `origin_m`（v1.1） | float[3] | 米 | world 省略；local 可缺省=无世界锚定（需世界落位的消费必填，§4） |
 | `port_map` 映射值（v1.1） | int | — | 0..7（键=ElementKey；V1–V7 校验归 M4） |
@@ -333,6 +338,7 @@ Provenance {
   - **②frame/origin_m**：**按来源判定，不盲补**——`source_type=MPDB`：优先读 v1.0 `import_config["frame"]`（M4 的 ImportConfig 字段，随 asdict(cfg) 入 provenance——声明在场按其值迁移）；声明缺失时 `identity_by="position"` → `world`（该模式 v1.0 即强制世界系），`identity_by="index"` 且无声明 → **拒**（v1.0 本就允许 local 或 world，index 模式无从判定——SchemaMigrationAmbiguous）；`source_type=ChannelEgine_38901` → **`frame=local`**（引擎请求的 `req.arrays` 元素坐标是**阵列局部系**——T2-03 §2），`origin_m` 分场景：统计场景（UMa/UMi/RMa/InH，geometry 必填）逐端回填——`import_config["geometry"]["tx_pos_m"]` → `arrays.tx.origin_m`、`import_config["geometry"]["rx_pos_m"]` → `arrays.rx.origin_m`（键名即 T2-03 §2 GenerateRequest 原文）；**CDL-x/TDL-x（geometry=None）→ `origin_m` 缺省=无世界锚定**（局部几何自足，§4 语义——簇伪径导向只需相对阵元位置，本就无世界落位可回填）；`source_type=CDL_table/TDL_table` → 无 `arrays` 则无字段可迁（TDL 定表直通本就无阵列语义）；`arrays` 在场（CDL 定表）→ 同引擎口径 `frame=local`、`origin_m` 缺省无锚定（定表阵列仅承担局部导向，无世界锚定语义可回填）；来源无法判定（如 `manual`）→ **拒绝自动迁移**（`SchemaMigrationAmbiguous`，要求显式声明坐标系——猜错坐标系会让 position 身份解析与导向计算整体错位，宁拒不猜）。
   - **③Cluster.phase_rad**：从 `provenance.import_config["cluster_phases"]`（v1.0 过渡载体，T2-03 §3）按链路×簇序回填；载体缺失则字段缺省（消费端按 T2-05 §3 优先级③种子兜底）。v1.1 起引擎转换**直写本字段**，过渡载体不再写入（读侧对 v1.0 旧数据保留兼容）。
   - **④coeffs 外置（复评结论，不改字段）**：`RayleighSpec.coeffs` 超阈值外置**不增设一等引用字段**——由 model-json codec 序列化层以 `$blob` 信封原位替换实现（T2-10 §2/§4）；本条 10MB 规则的强制性由 codec 层兑现，schema 字段形态不变。
+- **v1.1 → v1.2 变更与迁移**：新增 `Ray.doppler_hz?`（可选，只加不改）——迁移钩子**平凡**：v1.1 及更旧数据该字段缺省、**不回填**（上游 DOPPLER 列是本字段唯一来源，不从角度重建——平台重算属消费期 fallback 而非迁移语义）；编码端只写 v1.2。
 - **大体量**（time_varying CIR、256 系数×多径×多信道）支持**外置引用**（blob 句柄），JSON 只存元数据 + 引用。**阈值 = 10 MB**（已定）：序列化 ≤10 MB 内联，>10 MB 外置 blob。blob 格式（.npy/二进制）由 M10 定。
 - 可序列化 ⇒ 配置即数据、可版本化、可重放（《11》§5、文件 I/O《11》§6、格式细节 M10）。
 

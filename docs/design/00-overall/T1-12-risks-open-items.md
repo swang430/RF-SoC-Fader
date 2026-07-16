@@ -31,6 +31,7 @@
 - **修订**：`.asc` = **通用 CIR 交换/导出格式**（ChannelEgine 兼容），面向离线分析、第三方 fader 回放、未来支持 CIR 的设备。AscCirBackend 设计不变（《08》§4）。
 
 ## 4. MPDB 运行依赖 —— **已定**：HyperRT 直连（无中间件）；导入侧依赖 HyperRT SDK + PyTorch（《05》§2、《09》）。
+- **版本下限登记（2026-07-16）**：逐径 `DOPPLER` 列消费需 **HyperRT ≥ v3.2.6**（MPDB 手册 v1.1）；旧版库无列 → 按《T1-05》§5 fallback 链（velocity 重算/默认 0），零回归。
 
 ## 5. 多帧接收 —— 硬件已答：**当前 RF-SoC 不支持多帧语义**
 

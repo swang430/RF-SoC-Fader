@@ -32,7 +32,10 @@ def load(path: str) -> RawRtTable:
     link  = require_columns(db.link,  ["TX","RX","TX_ANT_POSITION","RX_ANT_POSITION"])
     chan  = require_columns(db.channel, ["LINK_ID","DELAY","H","AOA","ZOA","AOD","ZOD","CHANNEL_TYPE"])
     has_doppler = "DOPPLER" in columns_of(db.channel)         # ★v3.2.6+ 可选列——presence 探测，
-    #   **不入 require_columns**（旧库兼容，见下方规则）；在场时随 chan 一并取列
+    #   **不入 require_columns**（旧库兼容，见下方规则）
+    if has_doppler:
+        chan = with_column(chan, db.channel, "DOPPLER")       # ★可选列并入提取集——否则 rays
+        #   仅含必需列、r.DOPPLER 无数据可读
     return RawRtTable(
         links = with_synthetic_link_id(to_numpy(link)),   # ★LINK 表无 LINK_ID 列（手册 §2.1）——
         #   CHANNEL.LINK_ID 是 LINK 表的行索引：读取时合成 link_id = 行号(0-based)作为主键

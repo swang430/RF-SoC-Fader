@@ -37,8 +37,9 @@ class SynthesisConfig:
     mode: Literal["B"]                  # A 档另走 ATimeVaryingSynthesizer（§6）
     power_mode: Literal["coherent","noncoherent"]
     max_paths: int                      # ≤ 目标 capabilities.max_paths
-    velocity_tx_mps: Vec3 | None = None # 几何多普勒 fallback 重算的双端速度（《T1-05》§5 修订——
-    velocity_rx_mps: Vec3 | None = None #   各自可选、缺省视为静止；Ray.doppler_hz 在场时不参与取值，仅供交叉校验）
+    velocity_tx_mps: Vec3 | None        # 几何多普勒 fallback 重算的双端速度（《T1-05》§5 修订——
+    velocity_rx_mps: Vec3 | None        #   类型可 None=未给（视为静止）、无 dataclass 默认值：defaulted 字段
+                                        #   排在必填 rayleigh 前会 TypeError；Ray.doppler_hz 在场时仅供交叉校验）
     rayleigh: RayleighSpecConfig | None # 衰落边缘统计（可选；功率归一化经 M8 rayleigh_norm_gain，
                                         #   norm_mode: "per_tap"|"total"（默认 per_tap）随本配置显式声明——T2-08 §3.1）
     cluster_phase_seed: int = 0         # ★簇相位兜底种子：GCM/CDL 输入既无 Cluster.phase_rad 也无

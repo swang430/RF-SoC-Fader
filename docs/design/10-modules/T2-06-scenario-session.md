@@ -63,11 +63,12 @@ class Session:
                                               #   OperationInFlight 拒并发的判据；轮询方见此知「仍在跑」
     completed_ops: tuple[OpRecord, ...]       # ★终局操作历史（有界，最近 N 条；OpRecord={op_id, kind,
                                               #   outcome, at, error?, result?}——★outcome 全集（SDK/GUI 判据词表，
-                                              #   T2-09 §3 消费）：completed | failed | rejected | aborted_by_restart
+                                              #   T2-09 §3 消费）：completed | failed | rejected | aborted_by_restart | aborted_by_close
                                               #   ——completed=操作跑完（apply 类细节在 result.device_state：
                                               #   committed/rolled_back/dirty）；failed=操作异常终局（resolve 失败等）；
                                               #   rejected=受理后审计不可用零触达终局（T2-10 §6）；
-                                              #   aborted_by_restart=重启中止（§3）。★终局细节随记录：error=
+                                              #   aborted_by_restart=重启中止（§3）；aborted_by_close=在途 resolve
+                                              #   被会话 close 中止（§3 RESOLVING 行）。★终局细节随记录：error=
                                               #   该操作的结构化错误、result=其 ApplyResult 摘要。会话级
                                               #   last_error/last_apply 会被后续操作覆盖，晚归续等只能从
                                               #   OpRecord 取本操作的失败因/结果）：任务终局时运行器追加——
@@ -116,7 +117,7 @@ class ResolvedArtifacts:
 | 状态 | 含义 | 允许操作 |
 | :-- | :-- | :-- |
 | CREATED | 已绑定 scenario@version × device × backend，未物化 | resolve / apply（auto_resolve：内部先 resolve）/ close |
-| RESOLVING | 编排管线运行中（§4；长耗时异步 job，《T1-04》） | 查询进度 / close（对在途 resolve 的语义同 §6「RESOLVING cancel」行：放弃本地编排、引擎任务自然过期——close 前先将 current_op 以 aborted 终局，零设备触达直接 CLOSED。cancel 本身仍无 REST 端点，**提供前不入 allowed_ops 序列化**，不向客户端广告不可执行的操作） |
+| RESOLVING | 编排管线运行中（§4；长耗时异步 job，《T1-04》） | 查询进度 / close（对在途 resolve 的语义同 §6「RESOLVING cancel」行：放弃本地编排、引擎任务自然过期——close 前先将 current_op 以 `aborted_by_close` 终局（§2 词表值，等待者得到定义内终局），零设备触达直接 CLOSED。cancel 本身仍无 REST 端点，**提供前不入 allowed_ops 序列化**，不向客户端广告不可执行的操作） |
 | READY | 产物就绪（FramePlan/AscFileSet + 报告），设备零触达 | dry_run / apply / close |
 | APPLYING | M2 事务进行中 | 查询进度（同会话禁止并发第二个 apply） |
 | ACTIVE | committed——设备射频输出已按该产物生效 | readback / dry_run（§4 明写 {READY, ACTIVE}——列此保证 allowed_ops 不漏播合法操作）/ tweak（§4bis）/ re-apply / close |

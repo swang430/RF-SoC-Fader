@@ -49,7 +49,12 @@ ScenarioSource =(联合类型)
 class Session:
     session_id: str
     scenario_id: str; scenario_version: int   # ★锁定版本：不跟随 scenario 的后续编辑
-    device_id: str | None                     # asc 后端可 None（纯文件产物，无设备语义）
+    device_id: str | None                     # asc 后端可 None（纯文件产物，无设备语义）；
+                                              #   ★rfsoc 亦可 None=「**离线预览会话**」——resolve/dry_run/
+                                              #   artifact 全可用（render 纯函数只需 RFSOC_CAPS 静态能力、
+                                              #   零设备触达——S2「无设备完整预览」的会话形态，T2-11 §1）；
+                                              #   其 allowed_ops 恒排除 apply/tweak/recover（无设备可触），
+                                              #   上机=以同 scenario@version 新建带设备会话（产物缓存命中）
     backend: Literal["rfsoc", "asc"]
     state: SessionState                       # §3 状态机
     artifacts: ResolvedArtifacts | None       # resolve 产物缓存

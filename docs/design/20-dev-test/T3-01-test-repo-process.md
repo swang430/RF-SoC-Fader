@@ -118,7 +118,7 @@ async def test_disconnect_mid_apply_judged_dirty(fake_rfsoc): ...
 1. `status: green` 的每个用例 ID 必须出现在 `pytest --collect-only` 结果中（防「纸面绿」）；
 2. 每个带 `tc` 标记的用例，其 **id 必须出现在矩阵中某义务的 `cases` 列表**，且该义务的 `clause` 与标记的 `clause` 一致（防两类孤儿：无设计出处的噪音/越权用例，以及「借壳」宽泛 clause 而自身 ID 不入账、矩阵跟丢状态的用例）；
 3. `waived` 必须含 `approver/expiry` 且未过期（过期即 CI 红）；
-4. 用例 ID 全局唯一、`retired` 不被引用。
+4. 用例 ID 全局唯一；`retired` 用例 ID **只允许出现在 `status: retired` 的保留行内**（§3 的保位语义），出现在任何非 retired 义务的 `cases` 中即红（历史 ID 不得复用于在册义务）。
 
 - 首版矩阵种子 = 《T3-00》§5 挂账盘点（T3-02/03/04/05 落地时逐条编号入库）。
 - 矩阵变更与冻结文档升版**同 PR**（《T3-00》§4 变更联动）。

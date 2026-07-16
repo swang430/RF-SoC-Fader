@@ -71,7 +71,7 @@ class BlobStore:
     def pin(ref, owner) / unpin(ref, owner)              # 引用计数：scenario/session/model 持有者登记
 ```
 
-- **10MB 规则的唯一落点**（《T1-03c》§7）：判定量=**内联形态的实际体量**——即 `gain_series` 按 T1-03c JSON 形态（`(re,im)` 对）序列化后计入 model-json 的字节增量；**不按 npz-cir 字节判**（NPZ 是外置格式且更紧凑，用它判定会低估内联文档体量、漏触发外置——阈值语义所指本就是内联文档大小）。≤阈值：CIR **保持冻结 schema 的原字段形态内联**（逐 `Tap.gain_series: Complex[n_snapshots]`，无 M10 中间表示）；>阈值：**按 pair 切分为单对 NPZ**（仍 `npz-cir/v1`，n_pairs=1）逐一落 blob，`channels[(in,out)].cir_ref = BlobRef`——引用挂逐 Channel 且**保持冻结 schema 的单一 BlobRef 类型**（整卷共享+`(ref, index)` 复合引用需改 schema 字段类型，违反冻结基线，不取；内容寻址下切分不损去重语义），`gain_series` 不承载。阈值为 M10 常量、判定 helper 唯一（`attach_cir` 调用处），全平台不散落第二处。
+- **10MB 规则的唯一落点**（《T1-03c》§7）：判定量=**内联形态的实际体量**——即 `gain_series` 按 T1-03c JSON 形态（`(re,im)` 对）序列化后计入 model-json 的字节增量；**不按 npz-cir 字节判**（NPZ 是外置格式且更紧凑，用它判定会低估内联文档体量、漏触发外置——阈值语义所指本就是内联文档大小）。≤阈值：CIR **保持冻结 schema 的原字段形态内联**（逐 `Tap.gain_series: Complex[n_snapshots]`，无 M10 中间表示）；>阈值：**按 pair 切分为单对 NPZ**（仍 `npz-cir/v1`，n_pairs=1）逐一落 blob，`channels[(in,out)].cir_ref = BlobRef`——引用挂逐 Channel 且**保持冻结 schema 的单一 BlobRef 类型**（整卷共享+`(ref, index)` 复合引用需改 schema 字段类型，违反冻结基线，不取；内容寻址下切分不损去重语义），`gain_series` 不承载。阈值为 M10 常量、判定 helper 唯一，全平台不散落第二处——**同一 helper 亦覆盖 `RayleighSpec.coeffs` 大载荷**（256 复系数×多径×多信道可超阈值，《T1-03c》§10 与 CIR 同属该序列化规则）：判定同按内联 JSON 形态增量，内联/外置的字段落位按 T1-03c §10 既定形态执行（调用处：`attach_cir` 与谱系数装配）。
 - **GC**：引用计数归零的 blob 进延迟回收队列（宽限期防误删——审计留痕）；`pin/unpin` 随持有者生命周期由 repository 层自动维护，业务不手工管理。
 - .asc 产物与 FramePlan 存档同走 blob（M7 `/artifact` 端点经 `open_stream` 流式直出）。
 
@@ -94,7 +94,7 @@ class BlobStore:
 | 乐观锁冲突 | `VersionConflict`（携 current_version，M7→409） |
 | blob 缺失（悬空 ref） | `BlobMissing`（含 ref 与登记持有者——GC 误删可溯因） |
 | 磁盘满/IO 错 | 显式上抛，按阶段归属终态：**resolve 阶段**失败→RESOLVE_FAILED；**apply 前置**（审计预检/产物读取）失败→操作拒绝、会话**保持 READY**+OpRecord/last_error 记因（可重试）——不误入 RESOLVE_FAILED（resolve 专属终态，T2-06 §3）；均不产生半状态 |
-| audit 写失败 | **分级**：①**设备触达类**（apply/tweak/close 微帧/recover）——**审计先行**（write-ahead）：受理记录落盘失败 → **拒绝执行**（不触设备，503+告警）——《T1-11 §3》「所有触达设备操作必须留痕」是冻结基线，不得先斩后奏；终局记录写失败 → 事实已发生不可拒：强告警+**落盘重试队列**（独立 WAL 文件——主库不可用正是入队诱因，不得与主库同存储；重启时**先重放 WAL 补齐**再开放服务）；**补齐前该设备的新触达操作一律拒，且拒绝门随 WAL 持久**——进程崩溃不消失（否则审计洞永久存在而设备照常接单）。②非触达类生命周期操作（resolve 受理/终局等）——不作执行前置（无物理副作用，不因审计库抖动拒服务），但**同样必须持久**：写失败进同一重试队列补齐——T2-06 §2「生命周期全记录、无轮询也闭合」的承诺不因此打折；仅纯读请求零审计（T2-07 §4） |
+| audit 写失败 | **分级**：①**设备触达类**（apply/tweak/close 微帧/recover）——**审计先行**（write-ahead）：受理记录（begin）落盘失败 → **拒绝执行**（不触设备）——《T1-11 §3》「所有触达设备操作必须留痕」是冻结基线，不得先斩后奏。**失败的表达分同步/异步**：同步操作（tweak / close 微帧）→ 503+告警；异步提交（apply/recover 经 T2-06 submit 面）→ 202 已返回、无事后 503 通道——M6 运行器把该 op 以 `OpRecord{outcome=rejected, error=audit_unavailable}` 终局（设备零触达、会话保持原态），等待者经 op 关联获知；终局记录写失败 → 事实已发生不可拒：强告警+**落盘重试队列**（独立 WAL 文件——主库不可用正是入队诱因，不得与主库同存储；重启时**先重放 WAL 补齐**再开放服务）；**补齐前该设备的新触达操作一律拒，且拒绝门随 WAL 持久**——进程崩溃不消失（否则审计洞永久存在而设备照常接单）。②非触达类生命周期操作（resolve 受理/终局等）——不作执行前置（无物理副作用，不因审计库抖动拒服务），但**同样必须持久**：写失败进同一重试队列补齐——T2-06 §2「生命周期全记录、无轮询也闭合」的承诺不因此打折；仅纯读请求零审计（T2-07 §4） |
 
 ---
 

@@ -37,9 +37,18 @@ class SynthesisConfig:
     mode: Literal["B"]                  # A 档另走 ATimeVaryingSynthesizer（§6）
     power_mode: Literal["coherent","noncoherent"]
     max_paths: int                      # ≤ 目标 capabilities.max_paths
-    velocity_mps: Vec3 | None           # 几何多普勒（可选，《T1-05》§5）
+    velocity_tx_mps: Vec3 | None        # 几何多普勒 fallback 重算的双端速度（《T1-05》§5 修订——
+    velocity_rx_mps: Vec3 | None        #   类型可 None=未给（视为静止）、无 dataclass 默认值：defaulted 字段
+                                        #   排在必填 rayleigh 前会 TypeError；Ray.doppler_hz 在场时仅供交叉校验。
+                                        #   ★旧字段兼容：v1.0 冻结期持久化的 `velocity_mps` 读侧别名迁移 →
+                                        #   velocity_rx_mps = **−velocity_mps**、tx=None——旧式 `+v·k̂`（k̂=到达
+                                        #   方向）与新式 RX 项 `−v_RX·k̂_RX` 符号相反，取反才保持旧场景回放的
+                                        #   多普勒符号不变；写侧只写新字段（scenario 读钩子归 T2-06 §9-3/T2-10）
     rayleigh: RayleighSpecConfig | None # 衰落边缘统计（可选；功率归一化经 M8 rayleigh_norm_gain，
                                         #   norm_mode: "per_tap"|"total"（默认 per_tap）随本配置显式声明——T2-08 §3.1）
+    default_doppler_hz: float = 0.0     # ★多普勒末位兜底（《T1-05》§5 链 (2)）——doppler_of() 在
+                                        #   Ray.doppler_hz 缺失且未给 velocity_tx/rx 时取此值（与 M4
+                                        #   ImportConfig.default_doppler_hz 同语义，defaulted 字段区合法排位）
     cluster_phase_seed: int = 0         # ★簇相位兜底种子：GCM/CDL 输入既无 Cluster.phase_rad 也无
                                         #   provenance 载体时（如用户直录 3GPP CDL 定表，表无相位列）
                                         #   按此确定性合成（§3 cluster_phase 优先级③）
@@ -86,7 +95,8 @@ def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 
         # RT 已逐阵元对算径（几何真值，含近场效应）——无需导向合成
         for link in model.environment.links:
             io = portmap.map(link.tx_index, link.rx_index)        # ElementKey→(input,output)
-            pairs[io] = [(r.delay_s, r.gain, angles(r)) for r in rays_of(link)]
+            pairs[io] = [(r.delay_s, r.gain, angles(r), doppler_of(r, cfg, lam))  # ★四元组与下分支统一
+                         for r in rays_of(link)]
     else:  # single_reference：Phase 2 导向合成（★必须先于量化合并——正确性要点 1）
         ref = model.environment.links[0]
         for m in tx_elements(model.meta.arrays):
@@ -96,14 +106,17 @@ def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 
                     (r.delay_s,
                      r.gain * steer(model.meta.arrays.tx, m, r.aod_az_deg, r.aod_zen_deg, lam)
                             * conj(steer(model.meta.arrays.rx, n, r.aoa_az_deg, r.aoa_zen_deg, lam)),
-                     angles(r))
+                     angles(r),
+                     doppler_of(r, cfg, lam))   # ★逐径多普勒（《T1-05》§5 链：Ray.doppler_hz 直读 >
+                                                #   velocity_tx/rx 双端重算 > default）——随径穿透到合并
                     for r in rays_of(ref)]
 
     # Phase 3：逐信道对 量化→合并→选径（调 M4 函数集；输入已带导向相位）
     binned = {}
     for io, rays in pairs.items():
-        codes, quant = quantize_delays([d for d,_,_ in rays])     # 超范围丢弃+计数（M4 契约）
-        bins = merge_bins(codes, gains)                           # 同 bin 复增益相干叠加（保相位）
+        codes, quant = quantize_delays([d for d,_,_,_ in rays])   # 超范围丢弃+计数（M4 契约）
+        bins = merge_bins(codes, gains, angs, dopplers)           # 同 bin 相干叠加（保相位）；角度/多普勒
+                                                                  #   按功率加权聚合（T2-04 §5，v1.2）
         binned[io] = select_strongest(bins, k=cfg.max_paths, power_mode=cfg.power_mode)
 
     # Phase 4：★全系统共享归一化基准（正确性要点 2）——先全局扫描再归一
@@ -114,7 +127,9 @@ def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 
     R_tx, R_rx = correlation_from_angles(model, model.meta.arrays, lam)  # §4
     R = kron(R_tx, R_rx)
 
-    # 可选：几何多普勒 f_d=(v·k̂_arr)/λ 逐径；瑞利谱 spec（功率归一化交 M8 hook）
+    # 多普勒（《T1-05》§5 修订链）：Ray.doppler_hz 在场（上游 DOPPLER 列，v1.2）→ 直接透传，量化合并时
+    # 功率加权聚合入 Tap.doppler_hz（T2-04 §5）；缺失且给 velocity_tx/rx_mps → 双端投影重算
+    # f_d=(f_c/c)(v_TX·k̂_TX−v_RX·k̂_RX)（旧单端 v·k̂/λ 为 RX-only 特例）；再缺 → default。瑞利谱 spec（归一化交 M8）
     apply_doppler_and_rayleigh(taps, cfg, lam)
 
     tdl = assemble_tdl_model(model, taps, correlation=(R_tx,R_rx,R), reduced_from=model.id)
@@ -191,7 +206,7 @@ class ATimeVaryingSynthesizer:      # stub：接口冻结，不实现
 | **共享基准** | 两信道对功率比已知的 fixture | 归一化后相对功率保持（非各自归 1）（要点 2） |
 | **两模式一致性** | 远场平面波 fixture 同时构造 per_element_pair 真值与 single_reference 合成 | 两者 taps/R 偏差 ≤ 容差；近场 fixture 允许偏离并在报告注记 |
 | **保真闭环** | verify_fidelity：理想 fixture err<1e-10；量化/截断后 err 单调合理 | 阈值与单调性 |
-| **多普勒** | velocity 注入：f_d = v·k̂/λ 逐径解析对照 | 数值一致 |
+| **多普勒** | ①上游 Ray.doppler_hz 透传+聚合对照 ②velocity_tx/rx 双端投影重算解析对照（单端为 RX-only 特例） | 数值一致；两来源优先级正确（列在场不重算） |
 | **A 档守卫** | mode=A × RFSOC_CAPS | CapabilityError，零副作用 |
 | **空信道对** | 某 io 全径被量化丢弃 | 空 taps + 计数，整体不失败 |
 

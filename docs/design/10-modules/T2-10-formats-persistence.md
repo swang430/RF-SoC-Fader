@@ -58,7 +58,7 @@ def sniff(data, meta=None) -> kind
 ```
 
 - **版本化读写（版本主权分两类）**：**内部格式**在载荷内携带 `schema_version`，解码端**向前兼容读**（旧版数据 → 迁移钩子链升到当前版）、编码端只写当前版；**镜像格式载荷不加任何自有字段**（键集/头由源契约固定——NPZ 无 schema_version 键、asc 无额外头，设备/引擎按源契约直接消费），其版本记在 M10 **元数据边车/注册条目**上（与 sha256 边车同层，不进载荷）。
-  - **内部格式**（model-json / report-json / frameplan-bin / **cdl-tdl-table-json**——定表 JSON 的 schema 归 T1-03c 平台自有）：M10 迁移钩子演进——**T1-03c v1.1 已落地（2026-07-16 升版 PR）**：`model-json/v1 → v1.1` 钩子按 T1-03c §10 迁移规则实现（①portmap 升格 Meta.port_map ②frame **按来源与声明判定**——MPDB：优先 v1.0 `import_config["frame"]` 声明，缺失时 position 模式→world、index 模式→拒；引擎→local（统计场景 origin_m 自 `import_config["geometry"]` 逐端回填、CDL/TDL-x 无 geometry 则缺省无锚定）；table 无 arrays 跳过；manual/不可判→SchemaMigrationAmbiguous 拒（规则全文以 T1-03c §10 为准） ③phase_rad 从载体回填），旧库存模型无需重导；用户手写的定表裸文件（无 meta）按 sniff 裸文件规则处理（族+当前版显式假定，§上）。
+  - **内部格式**（model-json / report-json / frameplan-bin / **cdl-tdl-table-json**——定表 JSON 的 schema 归 T1-03c 平台自有）：M10 迁移钩子演进——**T1-03c v1.1 已落地（2026-07-16 升版 PR）**：`model-json/v1 → v1.1` 钩子按 T1-03c §10 迁移规则实现（①portmap 升格 Meta.port_map ②frame **按来源与声明判定**——MPDB：优先 v1.0 `import_config["frame"]` 声明，缺失时 position 模式→world、index 模式→拒；引擎→local（统计场景 origin_m 自 `import_config["geometry"]` 逐端回填、CDL/TDL-x 无 geometry 则缺省无锚定）；table 无 arrays 跳过；manual/不可判→SchemaMigrationAmbiguous 拒（规则全文以 T1-03c §10 为准） ③phase_rad 从载体回填），旧库存模型无需重导；**v1.1 → v1.2 钩子（2026-07-16，T1-03c §10）**：新增 `Ray.doppler_hz?` 可选字段——钩子**平凡**（只加不改：旧数据字段缺省、不回填，消费期走《T1-05》§5 fallback 链），编码端只写 v1.2；用户手写的定表裸文件（无 meta）按 sniff 裸文件规则处理（族+当前版显式假定，§上）。
   - **线缆契约镜像格式**（npz-cir 随 T2-03 §2、asc 随《T1-08》后端契约）：**布局主权在源契约，M10 只镜像注册、不独立演进**——升版=源契约先升（如引擎 v2 端点/键），M10 跟随注册新条目；黄金测试对照的就是源契约（§8）。
 - **完整性**：所有落盘产物带 sha256 边车（读取时校验，损坏显式报错不静默截断）。
 
@@ -152,4 +152,4 @@ class BlobStore:
 - 六类 codec 往返黄金 + NPZ/asc 与源契约（NPZ→T2-03 §2；asc→《T1-08》+ChannelEgine 样例）逐键核对全绿。
 - 乐观锁/append-only/内容寻址/blob 生命周期测试全绿。
 - 原子写注入测试与 T2-06 重启恢复用例联合通过（数据面自洽）。
-- T1-03c v1.0→v1.1 迁移钩子：v1.0 样本无损升级——黄金用例**按来源分支全覆盖**：portmap 升格（载体在场整体采用/缺失时键映射重建+降级标注、link_mode 按 links 集合级判定——端点对集合=tx×rx 笛卡尔积→per_element_pair、单链路合法端点多阵元→single_reference、重复/缺失/非法端点拒、TDL 级不重建）；frame 按来源与声明（MPDB 声明在场→按声明、缺失+position→world、缺失+index→拒；引擎统计→local+origin 逐端回填；引擎定表→local 无锚定；table 无 arrays 跳过；manual→SchemaMigrationAmbiguous 拒）；phase_rad 回填（载体在场/缺失缺省）。
+- T1-03c v1.0→v1.1 迁移钩子：v1.0 样本无损升级——黄金用例**按来源分支全覆盖**：portmap 升格（载体在场整体采用/缺失时键映射重建+降级标注、link_mode 按 links 集合级判定——端点对集合=tx×rx 笛卡尔积→per_element_pair、单链路合法端点多阵元→single_reference、重复/缺失/非法端点拒、TDL 级不重建）；frame 按来源与声明（MPDB 声明在场→按声明、缺失+position→world、缺失+index→拒；引擎统计→local+origin 逐端回填；引擎定表→local 无锚定；table 无 arrays 跳过；manual→SchemaMigrationAmbiguous 拒）；phase_rad 回填（载体在场/缺失缺省）；**v1.1→v1.2 平凡钩子**：v1.1 样本升 v1.2 后 `Ray.doppler_hz` 缺省且其余字段逐项不变（只加不改断言）。

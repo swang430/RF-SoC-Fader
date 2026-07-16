@@ -2,7 +2,7 @@
 
 > 第三册《测试设计》· 第 2 篇（L1–L4 的用例面：收编 + 补缺 + 负向矩阵）
 > 状态：草稿 v0.1 · 待评审
-> 依据：《T3-00》§3 金字塔/§5-B 义务/§5-E 缺口/原则 4；《T3-01》ID 规范与矩阵载体；冻结基线 `design-t1-v1.0`（T1-03c 升版 v1.1）/`design-t2-v1.0`
+> 依据：《T3-00》§3 金字塔/§5-B 义务/§5-E 缺口/原则 4；《T3-01》ID 规范与矩阵载体；冻结基线 `design-t1-v1.0`（T1-03c 升版 v1.2）/`design-t2-v1.0`
 > 消费方：追溯矩阵 `obligations.yaml` 初版（本篇 ID 分配即其种子）；P0–P2 各实现 PR 的用例义务来源
 
 ---
@@ -108,6 +108,7 @@
 | T2-07 §2/§4/§7 | 401/403 含所需 scope；429 含 Retry-After；CREATED 态 dry_run/artifact → 409 指明先 resolve | C-M7/S-SEC 段 |
 | T2-01 §8 | 越界换算 `ValueError`（phase 卷绕豁免）；畸形流重同步不停摆 | U-M1 段 |
 | T2-09 §3/§4 | 未知 error_code → 保底 `CepApiError` 不吞原文；`StaleWait`/`WaitTimeout` 语义区分 | C-M9 段 |
+| T2-04 §2（MPDB v1.1 修订） | CFR 模式库**显式拒收**（行语义非逐径，不静默错读）；DOPPLER 列与 velocity 双源冗余 → 列优先+偏差告警 | U-M4/C-M4 段 |
 
 矩阵纪律：本表每行在 `obligations.yaml` 至少一条义务；新增「拒/不静默」设计条款的 PR 必须同步本表（评审检查点）。
 

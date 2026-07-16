@@ -146,7 +146,7 @@ def import_mpdb(source, arrays: {tx: AntennaArray, rx: AntennaArray},
     return model, report                                  # level=RT；退化到 TDL 由 M5 编排；report 供 GUI/审计（§6）
 ```
 
-`ImportConfig`（dataclass，沿现有风格）：`fc, topology, path_expansion: bool, identity_by("index"|"position"), frame("world"；identity_by="position" 时必填，声明 positions_m 坐标系，§3.1), position_epsilon_m, max_paths≤24, power_mode(coherent|noncoherent), default_doppler_hz, velocity?(几何多普勒,《T1-05》§5), test_mode(conducted|ota)`。
+`ImportConfig`（dataclass，沿现有风格）：`fc, topology, path_expansion: bool, identity_by("index"|"position"), frame("world"|"local"，默认 "world"；声明 positions_m 坐标系并原样印到落库 arrays.frame——**分模式值域**：identity_by="position" 仅接受 "world"（传 "local" 拒绝并提示改用 index 模式，§3.1）；identity_by="index" 两者皆可（"local" 仅标注、不做变换，落库为无锚阵列）), position_epsilon_m, max_paths≤24, power_mode(coherent|noncoherent), default_doppler_hz, velocity?(几何多普勒,《T1-05》§5), test_mode(conducted|ota)`。
 
 ---
 

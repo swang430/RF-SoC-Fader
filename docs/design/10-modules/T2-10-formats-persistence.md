@@ -58,7 +58,7 @@ def sniff(data, meta=None) -> kind
 ```
 
 - **版本化读写（版本主权分两类）**：**内部格式**在载荷内携带 `schema_version`，解码端**向前兼容读**（旧版数据 → 迁移钩子链升到当前版）、编码端只写当前版；**镜像格式载荷不加任何自有字段**（键集/头由源契约固定——NPZ 无 schema_version 键、asc 无额外头，设备/引擎按源契约直接消费），其版本记在 M10 **元数据边车/注册条目**上（与 sha256 边车同层，不进载荷）。
-  - **内部格式**（model-json / report-json / frameplan-bin / **cdl-tdl-table-json**——定表 JSON 的 schema 归 T1-03c 平台自有）：M10 迁移钩子演进——**T1-03c v1.1 已落地（2026-07-16 升版 PR）**：`model-json/v1 → v1.1` 钩子按 T1-03c §10 迁移规则实现（①portmap 升格 Meta.port_map ②frame **按来源判定**——MPDB→world、引擎→local（统计场景 origin_m 自 `provenance.import_config["geometry"]` 回填、CDL/TDL-x 无 geometry 则缺省无锚定）、不可判→SchemaMigrationAmbiguous 拒 ③phase_rad 从载体回填），旧库存模型无需重导；用户手写的定表裸文件（无 meta）按 sniff 裸文件规则处理（族+当前版显式假定，§上）。
+  - **内部格式**（model-json / report-json / frameplan-bin / **cdl-tdl-table-json**——定表 JSON 的 schema 归 T1-03c 平台自有）：M10 迁移钩子演进——**T1-03c v1.1 已落地（2026-07-16 升版 PR）**：`model-json/v1 → v1.1` 钩子按 T1-03c §10 迁移规则实现（①portmap 升格 Meta.port_map ②frame **按来源与声明判定**——MPDB：优先 v1.0 `import_config["frame"]` 声明，缺失时 position 模式→world、index 模式→拒；引擎→local（统计场景 origin_m 自 `import_config["geometry"]` 逐端回填、CDL/TDL-x 无 geometry 则缺省无锚定）；table 无 arrays 跳过；manual/不可判→SchemaMigrationAmbiguous 拒（规则全文以 T1-03c §10 为准） ③phase_rad 从载体回填），旧库存模型无需重导；用户手写的定表裸文件（无 meta）按 sniff 裸文件规则处理（族+当前版显式假定，§上）。
   - **线缆契约镜像格式**（npz-cir 随 T2-03 §2、asc 随《T1-08》后端契约）：**布局主权在源契约，M10 只镜像注册、不独立演进**——升版=源契约先升（如引擎 v2 端点/键），M10 跟随注册新条目；黄金测试对照的就是源契约（§8）。
 - **完整性**：所有落盘产物带 sha256 边车（读取时校验，损坏显式报错不静默截断）。
 

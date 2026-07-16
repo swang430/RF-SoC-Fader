@@ -132,7 +132,7 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | **契约（stub L3）** | 全端点 happy + 全错误分类 | 状态码与 problem+json 逐字段正确 |
 | **OpenAPI 黄金** | `openapi.json` diff | 破坏性变更被 CI 拦截 |
 | **鉴权矩阵** | 3 scope × 全端点（含 SSE、SCPI） | 401/403 无遗漏、错误含所需 scope |
-| **审计完备** | control 域全操作 × 成功/失败/被拒；异步含「提交后不轮询」剧本 | 同步非触达=网关恰一条含 outcome；**同步设备触达（tweak / close 微帧）=网关 1 条含 outcome + 会话侧 begin/end 成对**（T2-06 §4bis tweak 与 §3 close 的 begin/end 包裹）；异步设备触达（apply/recover）=网关受理 1 条 + 会话侧 begin/end **成对**（op_id 关联、「每 begin 恰一 end」不变式，无轮询也闭合——T2-10 §3 append-only 语义）；**异步非触达（resolve）=网关受理 1 条 + 会话终局 1 条**（无 begin 前置，T2-10 §6 ②）；GET 零审计写 |
+| **审计完备** | control 域全操作 × 成功/失败/被拒；异步含「提交后不轮询」剧本 | 同步非触达：非会话操作（scenario 写等）=网关恰一条含 outcome；会话生命周期类（close(leave)/asc close）=网关 1 条 + 会话终局 1 条（T2-06 §3、T2-10 §6 ②）；**同步设备触达（tweak / close 微帧）=网关 1 条含 outcome + 会话侧 begin/end 成对**（T2-06 §4bis tweak 与 §3 close 的 begin/end 包裹）；异步设备触达（apply/recover）=网关受理 1 条 + 会话侧 begin/end **成对**（op_id 关联、「每 begin 恰一 end」不变式，无轮询也闭合——T2-10 §3 append-only 语义）；**异步非触达（resolve）=网关受理 1 条 + 会话终局 1 条**（无 begin 前置，T2-10 §6 ②）；GET 零审计写 |
 | **限流** | 突发+持续超额 | 429 + Retry-After；不影响其他 key |
 | **复合 apply 透传** | CREATED 态直接 apply | 网关仅发**一次** L3 调用 `submit_apply(auto_resolve=True)` 即返 202；状态检查与任务承载均在 M6（stub 断言零状态读取、网关无协程持有） |
 | **/channels 别名** | 0/1/2 个 ACTIVE 会话三剧本 | 唯一时等价嵌套路径；否则 409 指明嵌套路径 |

@@ -33,7 +33,10 @@ registry = {
   "cdl-tdl-table-json/v1":  # 3GPP CDL/TDL 定表 ↔ JSON（T1-03c 一等定表入口，cdl_tdl_reader 消费——
                       #   「任一层输入」的用户直录面；表无相位列，退化时相位兜底见 T2-05 §3 优先级③）
 }
-def encode(kind, obj) -> bytes ; def decode(kind, data, meta=None) -> obj
+def encode(kind, obj, blobs: BlobStore | None = None) -> bytes    # 编码超阈聚合时需 blobs 承接 $blob 落库
+def decode(kind, data, meta=None, blobs: BlobStore | None = None) -> obj
+    # ★$blob 信封的透明回填需 blobs 解析器——含信封的载荷在 blobs=None 时显式抛
+    #   BlobResolverRequired（不静默把信封原样交给调用方冒充数据）
 def sniff(data, meta=None) -> kind
     # ★镜像格式的版本在元数据边车而非载荷（下）——sniff/decode 须收 meta：载荷字节只能识别「族」
     #   （NPZ 容器/asc 文本/JSON），版本取自 meta；无 meta 的裸文件（外部导入场景）按族+源契约

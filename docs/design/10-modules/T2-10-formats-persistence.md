@@ -151,4 +151,4 @@ class BlobStore:
 - 六类 codec 往返黄金 + NPZ/asc 与源契约（NPZ→T2-03 §2；asc→《T1-08》+ChannelEgine 样例）逐键核对全绿。
 - 乐观锁/append-only/内容寻址/blob 生命周期测试全绿。
 - 原子写注入测试与 T2-06 重启恢复用例联合通过（数据面自洽）。
-- T1-03c v1.0→v1.1 迁移钩子：v1.0 样本无损升级——黄金用例**按来源分支全覆盖**：portmap 升格（载体在场整体采用/缺失时键映射重建+降级标注、link_mode 按 links 结构判定——M×N→per_element_pair、单链路多阵元→single_reference、皆不符拒、TDL 级不重建）；frame 按来源与声明（MPDB 声明在场→按声明、缺失+position→world、缺失+index→拒；引擎统计→local+origin 逐端回填；引擎定表→local 无锚定；table 无 arrays 跳过；manual→SchemaMigrationAmbiguous 拒）；phase_rad 回填（载体在场/缺失缺省）。
+- T1-03c v1.0→v1.1 迁移钩子：v1.0 样本无损升级——黄金用例**按来源分支全覆盖**：portmap 升格（载体在场整体采用/缺失时键映射重建+降级标注、link_mode 按 links 集合级判定——端点对集合=tx×rx 笛卡尔积→per_element_pair、单链路合法端点多阵元→single_reference、重复/缺失/非法端点拒、TDL 级不重建）；frame 按来源与声明（MPDB 声明在场→按声明、缺失+position→world、缺失+index→拒；引擎统计→local+origin 逐端回填；引擎定表→local 无锚定；table 无 arrays 跳过；manual→SchemaMigrationAmbiguous 拒）；phase_rad 回填（载体在场/缺失缺省）。

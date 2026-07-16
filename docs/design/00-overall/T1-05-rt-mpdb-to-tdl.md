@@ -62,7 +62,8 @@ def import_mpdb_to_canonical(source, array_geometry, cfg) -> CanonicalChannelMod
                 delay_s   = code * PATH_DELAY_UNIT_NS * 1e-9,
                 gain      = coh,                     # 复增益（保相位）
                 power     = power,
-                doppler_hz= cfg.default_doppler,     # 单快照无多普勒，见 §5
+                doppler_hz= bin_doppler(grp, cfg),   # ★按 §5 优先级链：上游 DOPPLER 列（bin 内功率
+                                                     #   加权平均，T2-04 §5）> velocity_tx/rx 双端重算 > default
                 angles    = weighted_angles(grp),    # 角度→交《06》算相关
             ))
 

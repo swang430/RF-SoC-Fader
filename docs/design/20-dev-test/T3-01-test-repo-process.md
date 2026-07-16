@@ -25,7 +25,7 @@ tests/
 ├── contract/        # L2：契约（消费 fakes/ 与 fixtures/golden/）
 ├── integration/     # L3：进程内编排 + TCP 环回假设备
 ├── system/          # L4：全栈（REST 起、SQLite、假设备/真引擎可切）
-├── hil/             # L5：硬件在环（hc/ 控制环、hr/ 射频测量环）——默认不收集，见 §5
+├── hil/             # L5：硬件在环（hc/ 控制环、hr/ 射频测量环）——默认收集但跳过，见 §5
 ├── fakes/           # 测试替身一等资产：fake_rfsoc/（假设备）、fake_engine/（假引擎）
 ├── fixtures/
 │   ├── golden/      # 黄金资产（只读区，变更纪律见 §4；逐项登记归 T3-04）

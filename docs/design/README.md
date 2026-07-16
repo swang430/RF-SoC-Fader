@@ -1,6 +1,6 @@
 # RF-SoC 信道仿真控制平台（CEP）· 设计文档
 
-本目录为平台设计文档，分三册。**第一册（顶层设计）已冻结：v1.0（2026-07-15，tag: `design-t1-v1.0`）**；第二、三册基于冻结基线展开。对第一册的后续变更需走 PR 评审并升版。
+本目录为平台设计文档，分三册。**第一册（顶层设计）已冻结：v1.0（2026-07-15，tag: `design-t1-v1.0`）；第二册（功能设计）已冻结：v1.0（2026-07-16，tag: `design-t2-v1.0`）**；第三册基于冻结基线展开。对已冻结册的后续变更需走 PR 评审并升版（先例：T1-03c v1.1）。
 
 ## 编号约定
 
@@ -37,7 +37,7 @@
 
 ## 后续（骨架已建，待展开）
 
-- **第二册 · 功能设计** `10-modules/`（**已完成**，2026-07-16）：[T2-00 模块地图](10-modules/T2-00-module-map.md)（清单/依赖/推进序）· [T2-01 协议编解码](10-modules/T2-01-protocol-codec.md)（M1，已合并）· [T2-02 设备后端/传输](10-modules/T2-02-device-backends.md)（M2，已合并）· [T2-04 RT-MPDB 导入](10-modules/T2-04-mpdb-import.md)（M4，已合并）· [T2-05 相关性合成](10-modules/T2-05-correlation.md)（M5，已合并）· [T2-03 引擎集成](10-modules/T2-03-engine-integration.md)（M3，已合并）· [T2-06 场景/会话管理](10-modules/T2-06-scenario-session.md)（M6，已合并）· [T2-07 API 网关](10-modules/T2-07-api-gateway.md)（M7，已合并）· [T2-08 遥测与校准](10-modules/T2-08-telemetry-calibration.md)（M8，已合并）· [T2-09 SDK](10-modules/T2-09-sdk.md)（M9，已合并）· [T2-10 格式与持久化](10-modules/T2-10-formats-persistence.md)（M10，已合并）· [T2-11 GUI](10-modules/T2-11-gui.md)（M11，已合并）——**第二册 11 个模块全部完成评审并合并（2026-07-16）**。T1-03c 已升版 v1.1（2026-07-16，打包①完整 PortMap ②origin/frame ③phase_rad ④coeffs 外置复评）。下一步候选：第三册 T3 测试设计 · P0 代码基座。
+- **第二册 · 功能设计** `10-modules/`（**已冻结 v1.0**，2026-07-16，tag: `design-t2-v1.0`）：[T2-00 模块地图](10-modules/T2-00-module-map.md)（清单/依赖/推进序）· [T2-01 协议编解码](10-modules/T2-01-protocol-codec.md)（M1，已合并）· [T2-02 设备后端/传输](10-modules/T2-02-device-backends.md)（M2，已合并）· [T2-04 RT-MPDB 导入](10-modules/T2-04-mpdb-import.md)（M4，已合并）· [T2-05 相关性合成](10-modules/T2-05-correlation.md)（M5，已合并）· [T2-03 引擎集成](10-modules/T2-03-engine-integration.md)（M3，已合并）· [T2-06 场景/会话管理](10-modules/T2-06-scenario-session.md)（M6，已合并）· [T2-07 API 网关](10-modules/T2-07-api-gateway.md)（M7，已合并）· [T2-08 遥测与校准](10-modules/T2-08-telemetry-calibration.md)（M8，已合并）· [T2-09 SDK](10-modules/T2-09-sdk.md)（M9，已合并）· [T2-10 格式与持久化](10-modules/T2-10-formats-persistence.md)（M10，已合并）· [T2-11 GUI](10-modules/T2-11-gui.md)（M11，已合并）——**第二册 11 个模块全部完成评审并合并，经 T1-15 设计问答与收官审查（PR #20）后冻结 v1.0（2026-07-16）**。T1-03c 已升版 v1.1（2026-07-16，打包①完整 PortMap ②origin/frame ③phase_rad ④coeffs 外置复评）。下一步候选：第三册 T3 测试设计 · P0 代码基座。
 - **第三册 · 测试设计** `20-dev-test/`（文件将以 `T3-` 前缀编号；原 T1–T5 模块代号为避免与册号撞名改为 `T3-01…T3-05`）：T3-01 流程/仓库 · T3-02 测试金字塔 · T3-03 硬件在环 · T3-04 黄金帧一致性 · T3-05 CI/发布/验收。
 
 ## 一句话架构

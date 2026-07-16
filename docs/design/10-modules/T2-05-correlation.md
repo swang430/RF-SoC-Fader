@@ -52,7 +52,7 @@ class FidelityReport:                   # §5 数值核验产物
     quant: QuantReport                  # 量化丢弃统计（透传 M4）
 ```
 
-- 错误前置：`model.level ∉ {RT,GCM,CDL}` 拒（TDL 无需退化、CIR 走 A 档）；`single_reference` 而 `meta.arrays` 缺失拒；`mode=A` 走 §6 守卫。
+- 错误前置：`model.level ∉ {RT,GCM,CDL}` 拒（TDL 无需退化、CIR 走 A 档）；`single_reference` 而 `meta.arrays` 缺失拒；`mode=A` 走 §6 守卫。**portmap 入参与 `Meta.port_map`（v1.1）必须一致**——编排层（T2-06）传入的就是模型所携那份；不一致=调用方缺陷，拒（防两源漂移）。
 
 ---
 
@@ -68,17 +68,17 @@ def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 
         return [PseudoRay(delay_s=c.delay_s,
                           gain=sqrt(c.power_linear)*exp(1j*cluster_phase(model, link, k)),
                           # cluster_phase 取相位优先级（单一实现）：
-                          # ①Cluster.phase_rad（schema 升版后）
+                          # ①Cluster.phase_rad（v1.1 一等字段——主读，引擎产出必带）
                           # ②provenance.import_config["cluster_phases"][link][k]
-                          #   （T2-03 §3 转换时写入的过渡载体，簇序=引擎输出序）
+                          #   （v1.0 旧模型兼容读——过渡载体，簇序=引擎输出序）
                           # ③两者皆缺（如用户直录 CDL 定表，表无相位）→
                           #   PRNG(cfg.cluster_phase_seed) 按 (link,k) 确定性合成 U(0,2π)，
                           #   种子记入输出 provenance 与 FidelityReport——可复现、不拒
                           #   （任一层输入原则，T1-03b）
                           angles=cluster_center_angles(c)) for k, c in enumerate(link.clusters)]
                           # ★k 由 enumerate 绑定：簇序号即 phase_rad 的索引键（引擎按簇序输出）
-        # 簇初相 phase_rad 来自引擎（seed 确定，T2-03 §2）；★该字段属 T1-03c 升版打包项（T2-04 §8-5 ③），
-        # 升版落地前以 provenance.import_config["cluster_phases"] 为过渡载体（T2-03 §3 转换时写入）；
+        # 簇初相 phase_rad 来自引擎（seed 确定，T2-03 §2）；★schema v1.1 起为 Cluster 一等字段
+        # （升级项③已落地，T1-03c §5.1）——provenance 载体仅作 v1.0 旧模型兼容读；
         # 簇内角扩展本期不展开（§2 注）
 
     if portmap.link_mode == "per_element_pair":
@@ -174,7 +174,7 @@ class ATimeVaryingSynthesizer:      # stub：接口冻结，不实现
 
 | 触发 | 处置 |
 | :-- | :-- |
-| `model.level ∉ {RT,GCM,CDL}` / provenance 缺 portmap | 拒（指明合法入口：M4 导入或 M3 引擎生成） |
+| `model.level ∉ {RT,GCM,CDL}` / **Meta.port_map 缺失**（v1.1 一等字段；v1.0 旧模型经迁移钩子从 provenance 载体升格，仍缺才拒） | 拒（指明合法入口：M4 导入或 M3 引擎生成） |
 | 某信道对合并后 0 有效径 | 该信道对产出空 taps（M2 渲染为不使能该信道）+ FidelityReport 计数，不整体失败 |
 | `mode=A` + 设备无 CIR 能力 | CapabilityError（§6） |
 | 数值异常（NaN 传播/奇异 R） | 拒并报出问题径/信道对定位 |

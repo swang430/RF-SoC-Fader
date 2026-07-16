@@ -1,7 +1,7 @@
 # 03c · 信道 Schema（canonical model 规范契约）
 
 > 第一册《总体设计》· 第 3c 篇（枢纽契约的字段级规范）
-> 状态：**v1.0 · 已冻结**（2026-07-15，tag: design-t1-v1.0）· **规范性(normative)**
+> 状态：**v1.1**（2026-07-16 升版）· **规范性(normative)**——冻结基线 v1.0（tag: design-t1-v1.0）后**首次按升版纪律走 PR 升版**（第二册评审累积的打包四项：①完整 PortMap 一等化 ②阵列坐标系声明 ③簇初相 ④coeffs 外置复评——变更明细与 v1.0→v1.1 迁移规则见 §10）
 > 前置：《03-architecture》§4、《03b-model-hierarchy》；被 L1/L2/L3/L4、两上游源、两后端共同依赖
 
 ---
@@ -46,7 +46,7 @@
 
 ```
 ChannelModel {
-  schema_version : string          # 如 "1.0"
+  schema_version : string          # 当前 "1.1"（编码端只写当前版；v1.0 旧数据经迁移钩子向前兼容读，§10）
   id             : string          # 模型唯一标识
   level          : RT | GCM | CDL | TDL          # 表示层级（《03b》）
   realization    : none | CIR                    # 正交时变实现
@@ -74,15 +74,41 @@ Meta {
                angle:"deg", frequency:"Hz" }        # 固定约定，规范强制
   angle_convention : { azimuth:"phi_deg[0..360)",
                        zenith:"theta_deg[0=+Z, 90=水平]" }   # 天顶角
-  arrays   : { tx: AntennaArray, rx: AntennaArray }  # 自包含，相关性所依
+  arrays?  : { tx: AntennaArray, rx: AntennaArray }  # 自包含，相关性所依——★按 level 限定：
+                                   #   level ∈ {RT,GCM,CDL} 必填（导向/身份解析/相关性所依）；
+                                   #   level=TDL 可缺省（定表直通无阵列语义——引擎 TDL-x 产出仍自带）
+  port_map? : PortMap              # ★v1.1（升级项①）：阵元↔设备端口的完整映射一等化——
+                                   #   置于 Meta 级（跨 tx/rx 的成对语义 + link_mode 无法归属单侧阵列）；
+                                   #   ★按 level 限定：level ∈ {RT,GCM,CDL} 必填（M5 退化消费面）；
+                                   #   level=TDL 可缺省（信道映射已固化在 channels[].addr）。
+                                   #   v1.0 的 AntennaArray.port_map(int[]) 废止（迁移见 §10）
 }
+
+PortMap {                          # v1.1 新增（结构定义与 T2-04 §3.1 同一；校验规则 V1–V7 仍归 M4）
+  tx_element_to_input  : Map[ElementKey, int(0..7)]   # 发射阵元(或阵元×极化) → 输入端口
+  rx_element_to_output : Map[ElementKey, int(0..7)]   # 接收阵元(或阵元×极化) → 输出端口
+  link_mode : per_element_pair | single_reference     # LINK 表形态声明（单一来源，防双源漂移）
+}
+ElementKey = int | [int, PolBranch]   # 传导：阵元号；OTA 双极化：(阵元号, 极化支路)
+PolBranch  = "V" | "H" | "+45" | "-45"   # ★字符串枚举（JSON 编码即该字符串）——与 PolConfig.slant_deg
+                                         #   数值对应：V=0°、H=90°、±45=±45°；与 T2-03 NPZ pairs 的
+                                         #   pol 整数枚举（0=无 1=V 2=H 3=+45 4=−45）的映射由 codec 定
+# ★JSON 编码形态（元组键不能做 JSON 对象键——与复数 (re,im) 同属 §10 内部表示约定）：
+#   两个 Map 序列化为**条目数组** [{element:int, pol?:string, port:int}, ...]，
+#   按 (element, pol) 排序（规范化键序——参与 model_id 内容寻址哈希，T2-10 §3）；
+#   内存表示 Map、JSON 表示条目表，由 model-json codec 定死（M10）
 
 AntennaArray {
   n_elements  : int
-  positions_m : float[n_elements][3]   # 阵元坐标(米，本地或世界)
+  positions_m : float[n_elements][3]   # 阵元坐标(米)——所属坐标系由 frame 声明（v1.1）
+  frame       : world | local          # ★v1.1（升级项②）：positions_m 的坐标系声明——
+                                       #   缺省 world（v1.0 数据语义不变）
+  origin_m?   : [x,y,z]                # ★v1.1（升级项②）：阵列参考点的世界系落位——world 时省略；
+                                       #   frame=local 且缺省 = **无世界锚定**（自由浮动阵列：局部几何
+                                       #   自足的消费——导向/相关计算——可用；position 身份解析等
+                                       #   需要世界系的消费显式拒）；需要世界落位时必填
   polarization : PolConfig             # 极化配置（含斜极化角）
-  orientation?  : float[3]             # 阵列朝向（可选）
-  port_map    : int[n_elements]        # ★ 阵元 ↔ 设备端口(0..7) 映射
+  orientation?  : float[3]             # 阵列朝向（可选；frame=local 时与 origin_m 共同构成变换）
 }
 
 PolConfig {
@@ -91,7 +117,8 @@ PolConfig {
   slant_deg : float[]        # 如 [+45,-45] 双斜极化 · [0,90] 交叉 V/H · [0] 单垂直
 }
 ```
-> `port_map`（阵元↔栅格端口）是 MIMO 保真的**重要设计**，规则细化归 M4（见《03b》§4、《12》#6）。schema 只规定它**在此承载**。
+> `port_map`（阵元↔栅格端口）是 MIMO 保真的**重要设计**——v1.1 起为 **Meta 级一等字段**（完整结构如上），不再依赖 provenance 过渡载体；**校验规则（V1–V7）与身份解析仍归 M4**（见《03b》§4、《12》#6、T2-04 §3）。
+> `frame/origin_m` 使「本地系阵列+自动变换」在 schema 层可承载——**实现范围不因此自动扩大**：position 身份解析当期实现仍先支持 world（T2-04 §3.1），本地系支持为实现期增强。
 
 ---
 
@@ -120,6 +147,10 @@ Ray {                                   # RT 层
 Cluster {                               # GCM / CDL 层
   delay_s       : float
   power_linear  : float
+  phase_rad?    : float                 # ★v1.1（升级项③）：簇初相（簇→伪径退化时作复增益辐角，
+                                        #   T2-05 §3）——引擎产出按 seed 生成、转换时必带（确定性契约
+                                        #   T2-03 §2）；定表 CDL 无相位来源可缺省（消费端按
+                                        #   cluster_phase_seed 确定性兜底，T2-05 §3 优先级③）
   aoa_az_deg, aoa_zen_deg : float       # 簇中心角
   aod_az_deg, aod_zen_deg : float
   az_spread_deg?, zen_spread_deg? : float   # 角度扩展（ASA/ASD/ZSA/ZSD）
@@ -283,6 +314,10 @@ Provenance {
 | `taps` 长度 | — | — | ≤24 |
 | `max_doppler_hz` | float | Hz | ≥0 |
 | `coeffs` | complex[256] | — | 频域滤波系数 |
+| `phase_rad`（v1.1） | float | 弧度 | 簇初相（可选；缺省时消费端种子兜底） |
+| `frame`（v1.1） | enum | — | world \| local（缺省 world） |
+| `origin_m`（v1.1） | float[3] | 米 | world 省略；local 可缺省=无世界锚定（需世界落位的消费必填，§4） |
+| `port_map` 映射值（v1.1） | int | — | 0..7（键=ElementKey；V1–V7 校验归 M4） |
 
 ---
 
@@ -291,7 +326,12 @@ Provenance {
 - **JSON** 为规范序列化。**复数序列化分两层（3GPP 无此标准）**：
   - **内部表示**（schema 自身）：用**直角 (re, im)**——计算友好（射线相干叠加即直角加法，避免极坐标↔直角与相位卷绕）。`{re,im}` vs `[re,im]` 由 M10 定死（批量抽头倾向 `[re,im]` 省体积）。
   - **导出格式**（落到目标）：由各 codec 自定，非 schema 统一——`.asc` 实/虚**分列**、PropSim `a+bi` 字符串、RF-SoC 设备 **amp+phase 极坐标码值**。
-- `schema_version` 语义化；破坏性变更升主版本，对外 API 契约随之（《04》§7）。
+- `schema_version` 语义化，**版本纪律（内部契约口径）**：canonical model **不直出对外 API**（《04》§7——对外是 /v1 REST 投影），全部消费者随平台同版部署，**不存在旧 reader 读新数据的场景**——因此兼容承诺是单向的**向前兼容读**（新读旧，经迁移钩子）；**主版本升级保留给「无法编写无损迁移钩子的语义重构」**，可钩子化的结构迁移（如本次 PortMap 字段搬移）走次版本。防御面：读到高于当前支持的版本 → `SchemaTooNew` 显式拒（T2-10 §6），不猜读。
+- **v1.0 → v1.1 变更与迁移**（读侧钩子归 M10 model-json codec，T2-10 §2；编码端只写 v1.1）：
+  - **①port_map 一等化**：迁移**优先整体采用** `provenance.import_config["portmap"]`（v1.0 的规范载体，M4/M3 均按约定写入）升为 `Meta.port_map`；载体缺失时由各 AntennaArray 的 `int[]` 投影重建**键映射**（单极化键——重建属**降级假定**，迁移结果显式标注），但 **`link_mode` 不可虚构**（旧 `int[]` 不编码链路形态；把 single_reference 模型错标 per_element_pair 会让 T2-05 `reduce_to_tdl` 跳过导向合成分支、只映射参考链路——静默降质）——按模型自身 `environment.links` 结构做**集合级判定**（仅数量相等不足信：一条重复对+一条缺失对也能凑齐计数——与 T2-04 §3.1 分模式核验同口径）：links 的 `(tx,rx)` 端点对**集合恰等于**两侧阵元索引的**笛卡尔积**（逐对恰一条、无重复无缺失）且对数 >1 → `per_element_pair`；恰一条链路、其端点是合法阵元对、且任一侧阵元数 >1 → `single_reference`；1×1 阵列（两形态简并等价）→ `per_element_pair`；集合核验不满足任一形态（重复对/缺失对/非法端点）→ **拒**（`SchemaMigrationAmbiguous`，宁拒不猜）；TDL 级无 links 表可判 → 不重建、字段缺省（port_map 该层级本就可选，且角度已塌缩、无导向消费）。v1.0 的 `AntennaArray.port_map` 字段废止。
+  - **②frame/origin_m**：**按来源判定，不盲补**——`source_type=MPDB`：优先读 v1.0 `import_config["frame"]`（M4 的 ImportConfig 字段，随 asdict(cfg) 入 provenance——声明在场按其值迁移）；声明缺失时 `identity_by="position"` → `world`（该模式 v1.0 即强制世界系），`identity_by="index"` 且无声明 → **拒**（v1.0 本就允许 local 或 world，index 模式无从判定——SchemaMigrationAmbiguous）；`source_type=ChannelEgine_38901` → **`frame=local`**（引擎请求的 `req.arrays` 元素坐标是**阵列局部系**——T2-03 §2），`origin_m` 分场景：统计场景（UMa/UMi/RMa/InH，geometry 必填）逐端回填——`import_config["geometry"]["tx_pos_m"]` → `arrays.tx.origin_m`、`import_config["geometry"]["rx_pos_m"]` → `arrays.rx.origin_m`（键名即 T2-03 §2 GenerateRequest 原文）；**CDL-x/TDL-x（geometry=None）→ `origin_m` 缺省=无世界锚定**（局部几何自足，§4 语义——簇伪径导向只需相对阵元位置，本就无世界落位可回填）；`source_type=CDL_table/TDL_table` → 无 `arrays` 则无字段可迁（TDL 定表直通本就无阵列语义）；`arrays` 在场（CDL 定表）→ 同引擎口径 `frame=local`、`origin_m` 缺省无锚定（定表阵列仅承担局部导向，无世界锚定语义可回填）；来源无法判定（如 `manual`）→ **拒绝自动迁移**（`SchemaMigrationAmbiguous`，要求显式声明坐标系——猜错坐标系会让 position 身份解析与导向计算整体错位，宁拒不猜）。
+  - **③Cluster.phase_rad**：从 `provenance.import_config["cluster_phases"]`（v1.0 过渡载体，T2-03 §3）按链路×簇序回填；载体缺失则字段缺省（消费端按 T2-05 §3 优先级③种子兜底）。v1.1 起引擎转换**直写本字段**，过渡载体不再写入（读侧对 v1.0 旧数据保留兼容）。
+  - **④coeffs 外置（复评结论，不改字段）**：`RayleighSpec.coeffs` 超阈值外置**不增设一等引用字段**——由 model-json codec 序列化层以 `$blob` 信封原位替换实现（T2-10 §2/§4）；本条 10MB 规则的强制性由 codec 层兑现，schema 字段形态不变。
 - **大体量**（time_varying CIR、256 系数×多径×多信道）支持**外置引用**（blob 句柄），JSON 只存元数据 + 引用。**阈值 = 10 MB**（已定）：序列化 ≤10 MB 内联，>10 MB 外置 blob。blob 格式（.npy/二进制）由 M10 定。
 - 可序列化 ⇒ 配置即数据、可版本化、可重放（《11》§5、文件 I/O《11》§6、格式细节 M10）。
 
@@ -314,7 +354,7 @@ Provenance {
 2. ~~CDL/TDL 表格式~~ → **已定**：自定义 JSON 体现 3GPP 表（§5.4），`cdl_tdl_reader` 解析。
 3. **复数序列化**（3GPP 无标准）——内部表示用直角 (re,im)（计算友好）；`{re,im}` vs `[re,im]` 由 M10 定；导出格式(.asc 分列 / PropSim `a+bi` / 设备 amp+phase)由各 codec 定，非 schema 统一（§10）。
 4. ~~CIR 外置存储边界~~ → **已定：10 MB**（序列化 ≤10 MB 内联，>10 MB 外置 blob，§7/§10）；blob 格式归 M10。
-5. `port_map`（阵元↔端口）规则——归 M4（重要设计）。
+5. ~~`port_map`（阵元↔端口）承载形态~~ → **已定（v1.1 升级项①）**：完整 PortMap 结构一等化于 `Meta.port_map`（§4）；校验规则（V1–V7）与身份解析仍归 M4（T2-04 §3）。
 
 ## 13. 本篇验收
 - schema 能**无损承载** MPDB 全部 RT 数据（§2 映射无丢失）。

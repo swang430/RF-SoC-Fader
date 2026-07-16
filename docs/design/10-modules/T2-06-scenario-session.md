@@ -103,7 +103,7 @@ class ResolvedArtifacts:
 | 状态 | 含义 | 允许操作 |
 | :-- | :-- | :-- |
 | CREATED | 已绑定 scenario@version × device × backend，未物化 | resolve / apply（auto_resolve：内部先 resolve）/ close |
-| RESOLVING | 编排管线运行中（§4；长耗时异步 job，《T1-04》） | 查询进度（cancel 属开放问题 §9-4、REST 无取消端点——**未提供前不入 allowed_ops 序列化**，不向客户端广告不可执行的操作） |
+| RESOLVING | 编排管线运行中（§4；长耗时异步 job，《T1-04》） | 查询进度（cancel 语义见 §6「RESOLVING cancel」行——取消本地编排、引擎侧联动 T2-03 开放问题 3；REST 无取消端点，**提供前不入 allowed_ops 序列化**，不向客户端广告不可执行的操作） |
 | READY | 产物就绪（FramePlan/AscFileSet + 报告），设备零触达 | dry_run / apply / close |
 | APPLYING | M2 事务进行中 | 查询进度（同会话禁止并发第二个 apply） |
 | ACTIVE | committed——设备射频输出已按该产物生效 | readback / tweak（§4bis）/ re-apply / close |

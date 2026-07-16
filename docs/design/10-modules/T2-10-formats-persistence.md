@@ -41,8 +41,9 @@ registry = {
                       #   初相（gain=√P·e^{jφ}，canonical Tap 要求复增益，与 T2-03 taps.phase_rad
                       #   同思想）。CDL 定表另随请求携 arrays+portmap（reader 写入 meta.arrays 与
                       #   provenance.portmap，与 M4/M3 对称——M5 退化前置要求）；TDL 定表另随请求携
-                      #   目标信道对列表（默认 [(0,0)]——taps 落 channels[(in,out)]、grid.channel_pairs
-                      #   同步：TDL 不经 M5、直通 M2 渲染按信道对键取数，无键无处落）。
+                      #   栅格拓扑（grid.topology 为 schema 必填，默认 8*8）与目标信道对列表
+                      #   （默认 [(0,0)]，须 ⊆ 拓扑有效对——taps 落 channels[(in,out)]、grid 同步：
+                      #   TDL 不经 M5、直通 M2 渲染按信道对键取数，无键无处落）。
                       #   全部物化参数入 provenance 可复现
 }
 def encode(kind, obj, blobs: BlobStore | None = None) -> bytes    # 编码超阈聚合时需 blobs 承接 $blob 落库

@@ -41,8 +41,9 @@ class SynthesisConfig:
     velocity_rx_mps: Vec3 | None        #   类型可 None=未给（视为静止）、无 dataclass 默认值：defaulted 字段
                                         #   排在必填 rayleigh 前会 TypeError；Ray.doppler_hz 在场时仅供交叉校验。
                                         #   ★旧字段兼容：v1.0 冻结期持久化的 `velocity_mps` 读侧别名迁移 →
-                                        #   velocity_rx_mps（旧单端公式即 RX-only 特例，语义等价）、tx=None；
-                                        #   写侧只写新字段（scenario 读钩子归 T2-06 §9-3/T2-10）
+                                        #   velocity_rx_mps = **−velocity_mps**、tx=None——旧式 `+v·k̂`（k̂=到达
+                                        #   方向）与新式 RX 项 `−v_RX·k̂_RX` 符号相反，取反才保持旧场景回放的
+                                        #   多普勒符号不变；写侧只写新字段（scenario 读钩子归 T2-06 §9-3/T2-10）
     rayleigh: RayleighSpecConfig | None # 衰落边缘统计（可选；功率归一化经 M8 rayleigh_norm_gain，
                                         #   norm_mode: "per_tap"|"total"（默认 per_tap）随本配置显式声明——T2-08 §3.1）
     default_doppler_hz: float = 0.0     # ★多普勒末位兜底（《T1-05》§5 链 (2)）——doppler_of() 在

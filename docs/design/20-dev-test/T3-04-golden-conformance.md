@@ -34,7 +34,7 @@
 | G6 | `calib/` | 谱归一系数组：Jakes/平坦/混合多 Tap，per_tap 与 total 双模式期望增益 | 解析能量比推导（《T2-08》§3.1 公式） | `tools/golden/gen_calib.py`（仅 numpy） | `np.allclose`，容差 ≤1e-12 | U-M8 段 |
 | G7 | `merge/` | 量化合并对照集：同输入下旧 `tdl.py` 输出（相干叠加/0..1050 丢弃计数/不夹端点），归一化列除外 | 旧 `channel_simulator/tdl.py`（**历史资产**，冻结于收编时点的 commit 哈希） | 收编时点运行旧实现一次性落库，provenance 记 commit——此后旧实现变动不追随 | 数值逐项相等（归一化列按传入 ref 重算） | U-M4 段 |
 | G8 | `api/` | `openapi.json` 快照、problem+json fixture 集（每 error_code 一例）、SCPI 指令表黄金响应、allowed_ops 词表 | /v1 合同（T2-07 §2/§3 表 + T2-06 §3 状态表） | 首版随 M7 合同评审冻结（合同先行于实现，T2-07 §8）；**双向消费**：M7 契约测试与 M9 异常映射测试读同一份 | JSON 结构化 diff（键序无关）；SCPI 逐字节 | C-M7/C-M9 段 |
-| G9 | `codec/` | 六类 codec 黄金样本 + v1.0→v1.1 迁移矩阵样本（portmap/frame 按来源分支/phase_rad 全分支，含拒绝分支） | T1-03c §10 迁移规则 + 各来源 v1.0 样本（手工构造最小化 JSON） | 手工构造 v1.0 样本（每分支一份，含 SchemaMigrationAmbiguous 触发样本）；期望 v1.1 按规则手工推导 | JSON 结构化 diff；拒绝分支断言异常类型 | C-M10 段、I-MIG-001 |
+| G9 | `codec/` | 六类 codec 黄金样本 + v1.0→v1.1 迁移矩阵样本（portmap/frame 按来源分支/phase_rad 全分支，含拒绝分支）+ **v1.1→v1.2 平凡钩子样本**（v1.1 样本升 v1.2：`Ray.doppler_hz` 缺省且其余字段逐项不变；另一份 v1.2 带 doppler_hz 样本做编解码往返） | T1-03c §10 迁移规则 + 各来源 v1.0/v1.1 样本（手工构造最小化 JSON） | 手工构造旧版样本（每分支一份，含 SchemaMigrationAmbiguous 触发样本）；期望值按规则手工推导 | JSON 结构化 diff；拒绝分支断言异常类型 | C-M10 段、I-MIG-001 |
 | G10 | `idempotence/` | 幂等锚三件套：固定 scenario fixture 的 model_id、artifact_hash、**渲染帧序列字节存档**（frameplan-bin，逐字节比对——缺帧字节则序列化不确定性/hash 与产物错配无从捕获） | 确定性契约（同输入同 id）——**唯一允许「实现首跑落锚」的域**：首跑值经评审冻结为锚，此后任何漂移=破坏确定性（回归性质，非正确性出处） | P1 首个稳定版本跑一次落锚 + 评审冻结 | id/hash 字符串相等 + 帧序列**逐字节**相等 | C-M6 段、S-UC7 |
 | G11 | `trajectory/` | **B+ 黄金轨迹（预留）**：直线匀速 UMa 轨迹的 B+ 回放 vs A 档 `.asc` 参考 | 《T1-15》§7 验收判据 | 随 B+ 排期（H1–H4 确认后）；目录先建、provenance 标 planned | 一致性对比（判据随 T3-03 C1–C4 定标） | HR 段（T3-03） |
 

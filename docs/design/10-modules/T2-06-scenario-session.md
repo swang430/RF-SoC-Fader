@@ -346,7 +346,7 @@ M7/GUI          M6(Session)              M3/M4/M5                M2(Backend)    
 
 1. 跨设备会话（多机箱级联）的事务一致性——P4 项（《T1-10》开放问题 2），本期单设备会话。
 2. ACTIVE 期间遥测越限（M8 告警）是否自动降幅/回滚——本期只告警不自动动作，安全联动策略实现期与 M8 协同定。
-3. ~~scenario schema 随 T1-03c v1.1 升版的迁移~~ → **已闭合（v1.1 已于 2026-07-16 落地）**：scenario 侧变更仅 ImportConfig 新增带默认值的 `frame` 字段（默认 "world"，T2-04 §4）——「只加不改」成立，旧 Scenario 反序列化兼容；旧场景缺 frame 的读入**与 T1-03c §10 迁移规则同口径、不盲补**：`identity_by="position"` → world（v1.0 该模式即强制世界系）；`identity_by="index"` → **拒**（`SchemaMigrationAmbiguous`，要求用户显式声明——v1.0 的 index 模式 local/world 皆可能，默认 world 会静默错标局部几何、导向计算整体错位）。**（2026-07-16 追记，MPDB 手册 v1.1 PR）**：SynthesisConfig 的 `velocity_mps` 改双端 `velocity_tx/rx_mps`——旧 scenario 读侧**别名迁移**：`velocity_mps` → `velocity_rx_mps`（旧单端公式即 RX-only 特例，语义等价、几何多普勒不丢）、`velocity_tx_mps=None`；写侧只写新字段。
+3. ~~scenario schema 随 T1-03c v1.1 升版的迁移~~ → **已闭合（v1.1 已于 2026-07-16 落地）**：scenario 侧变更仅 ImportConfig 新增带默认值的 `frame` 字段（默认 "world"，T2-04 §4）——「只加不改」成立，旧 Scenario 反序列化兼容；旧场景缺 frame 的读入**与 T1-03c §10 迁移规则同口径、不盲补**：`identity_by="position"` → world（v1.0 该模式即强制世界系）；`identity_by="index"` → **拒**（`SchemaMigrationAmbiguous`，要求用户显式声明——v1.0 的 index 模式 local/world 皆可能，默认 world 会静默错标局部几何、导向计算整体错位）。**（2026-07-16 追记，MPDB 手册 v1.1 PR）**：SynthesisConfig 的 `velocity_mps` 改双端 `velocity_tx/rx_mps`——旧 scenario 读侧**别名迁移（符号保持）**：`velocity_mps` → `velocity_rx_mps = −velocity_mps`、`velocity_tx_mps=None`——旧式 `+v·k̂`（k̂=到达方向）与新式 RX 项 `−v_RX·k̂_RX` 符号相反，取反保证旧场景回放的多普勒符号不变（T2-05 §2 同注）；写侧只写新字段。
 4. artifact_cache 的失效策略（caps 变更/固件升级后 digest 变化即自然失效；容量上限实现期定）。
 5. **B+ 播放调度器（保留接口设计，《T1-15》§7 D7）**：会话状态机增 PLAYING 子态；`PlaybackPlan` 预编译（微事务时间表+吞吐校验）与定时调度归本模块；tweak 通道复用为参数流（不 reset/不动使能/不发 ID33）。随 H1–H4 硬件确认排期（《T1-12》§8b），未确认前能力门拒（不入 allowed_ops 序列化，同 RESOLVING cancel 先例）。
 

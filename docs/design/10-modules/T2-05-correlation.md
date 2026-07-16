@@ -39,7 +39,10 @@ class SynthesisConfig:
     max_paths: int                      # ≤ 目标 capabilities.max_paths
     velocity_tx_mps: Vec3 | None        # 几何多普勒 fallback 重算的双端速度（《T1-05》§5 修订——
     velocity_rx_mps: Vec3 | None        #   类型可 None=未给（视为静止）、无 dataclass 默认值：defaulted 字段
-                                        #   排在必填 rayleigh 前会 TypeError；Ray.doppler_hz 在场时仅供交叉校验）
+                                        #   排在必填 rayleigh 前会 TypeError；Ray.doppler_hz 在场时仅供交叉校验。
+                                        #   ★旧字段兼容：v1.0 冻结期持久化的 `velocity_mps` 读侧别名迁移 →
+                                        #   velocity_rx_mps（旧单端公式即 RX-only 特例，语义等价）、tx=None；
+                                        #   写侧只写新字段（scenario 读钩子归 T2-06 §9-3/T2-10）
     rayleigh: RayleighSpecConfig | None # 衰落边缘统计（可选；功率归一化经 M8 rayleigh_norm_gain，
                                         #   norm_mode: "per_tap"|"total"（默认 per_tap）随本配置显式声明——T2-08 §3.1）
     default_doppler_hz: float = 0.0     # ★多普勒末位兜底（《T1-05》§5 链 (2)）——doppler_of() 在

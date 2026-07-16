@@ -115,7 +115,9 @@ def import_mpdb(source, arrays: {tx: AntennaArray, rx: AntennaArray},
         schema_version=..., id=new_id(), level="RT", realization="none",
         meta=Meta(center_frequency_hz=cfg.fc, units=CANONICAL_UNITS,
                   angle_convention=ZENITH,
-                  arrays=arrays,                              # 自包含（《T1-03c》§4）
+                  arrays=with_frame(arrays, cfg.frame),       # 自包含（《T1-03c》§4）——★v1.1 落库标注：
+                  # 调用方声明的 cfg.frame 印到各 arrays.frame（position 模式已强制 world；
+                  # index 模式按声明落库——local 且无 origin_m 即无锚定语义，T1-03c §4）
                   port_map=portmap),                          # ★v1.1：校验过的完整 PortMap 直写
         # Meta.port_map 一等字段（含极化键与 link_mode，T1-03c §4 升级项①）——
         # 不再经 int[] 投影；provenance 载体（见下）降为冗余溯源与 v1.0 兼容

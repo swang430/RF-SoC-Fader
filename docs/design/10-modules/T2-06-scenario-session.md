@@ -228,9 +228,12 @@ async def resolve(sess) -> ResolvedArtifacts:
                 decl.port_dbm if decl else None,
                 loss, shared_norm_gain_db=norm,
                 p_in_source=decl.source if decl else None,
-                rendered=(power_settings_of(artifact)    # ★rfsoc：帧产物的**输出级**设置投影（ID11 衰减/AWGN 码，
-                          if sess.backend == "rfsoc"     #   不含径幅——径幅已由 loss+norm 承载，防双计）
-                          else None))                    # ★asc：AscFileSet 无帧设置——rendered=None 合法，plan
+                rendered=(power_settings_of(artifact, sess)  # ★rfsoc：帧产物的**输出级**设置投影（ID11 幅值系数/
+                          if sess.backend == "rfsoc"     #   AWGN 码——不含径幅，防双计）+ rf_mode（会话设备配置；
+                          else None))                    #   **离线预览 device_id=None → rf_mode=None**：bypass 项
+                                                         #   降口 relative + "bypass_mode_unknown" 标注，预览不失败
+                                                         #   ——S2 无设备完整预览保持，T2-08 §3.6）
+                                                         # ★asc：AscFileSet 无帧设置——rendered=None 合法，plan
                                                          #   降为 scope="model_only"（.asc 绝对功率由回放设备
                                                          #   定标，平台只承诺模型损耗链，T2-08 §3.6）
                                                          # ★N5「现状评估」（target=None）：评估**将下发的产物**；

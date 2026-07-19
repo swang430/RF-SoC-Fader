@@ -89,8 +89,9 @@
 | TD-C-06 | 多设备寻址 + GUI 设备管理子视图（P4 flag） | 《T1-10》+ 《T2-11》§3④ | MS-B | P4 行（多设备寻址 + SCPI 冒烟） | todo |
 | TD-C-07 | B+ 参数流式播放（PLAYING 态/PlaybackPlan/三 capabilities 默认 False） | 《T1-15》§7（D7/D8） | **H1–H4 硬件确认**（《T3-03》台账） | H 项逐条 HIL 兑现后按 capabilities 启用；C1–C4 连续性判据 | blocked(H1–H4) |
 | TD-C-08 | A 档时变 CIR 注入（通用 fader 原则：接口保留、按 capabilities 启用；现实出口=TD-B-04） | 《T1-12》+ 《T1-06》A 档 | 硬件支持 CIR 注入（当前 RF-SoC 不支持，2026-07-14 确认） | capabilities 门控启用 + 注入链路 HIL | blocked(硬件) |
-| TD-C-09 | 硬件台账兑现：N1 PAPR、N2 bypass 实测值、E_ref 校准、H1–H5 | 《T3-03》§5 台账分型 | 台架可用 | 逐项 HIL 报告（《T3-03》§4 模板）销账 | blocked(台架) |
+| TD-C-09 | 硬件台账兑现：N2 bypass 实测值、E_ref 校准、H1–H5（N1 拆出——见 TD-C-11，非台架项） | 《T3-03》§5 台账分型 | 台架可用 | 逐项 HIL 报告（《T3-03》§4 模板）销账 | blocked(台架) |
 | TD-C-10 | HIL-R 射频环六项基线测量（信号源→RF-SoC→频谱仪，10 MHz 共参考） | 《T3-03》HIL-R 细则 | TD-A-10 | 六项基线测量报告 + HR 用例转绿 | blocked(台架) |
+| TD-C-11 | N1 PAPR 调研落定：5G OFDM 峰均比调研 → `DEFAULT_PAPR_5G` 定版（**设计输入调研，非台架测量**——《T3-03》§3.3 分型；HIL 只消费当前电平预算） | 《T2-08》§3.3 + 《T1-12》N1 | 无（不依赖台架） | 调研结论评审通过 → 只改参数默认值落定（参数化已就位，倒置守卫不变）；M8 电平指引/M11 输入提示随之解封 | todo |
 
 ## 6. 与 gate/验收的衔接
 

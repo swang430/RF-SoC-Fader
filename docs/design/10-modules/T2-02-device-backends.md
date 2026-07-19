@@ -1,7 +1,7 @@
 # T2-02 · M2 设备后端与传输（功能设计）
 
 > 第二册《功能设计》· 第 2 篇（L2 层）
-> 状态：**v1.0 · 已冻结**（2026-07-16，tag: design-t2-v1.0）
+> 状态：**v1.0 · 已冻结**（2026-07-16，tag: design-t2-v1.0）· §2 capabilities 已随《T1-12》N5（输入功率声明制）增旗修订（2026-07-19 PR）
 > 依据：《T1-08 多设备后端》《T1-11 §1 事务化下发》《T1-12 §0/#1/#5/N4》（冻结基线）；依赖 **M1（T2-01）** 的编码/解析/回显比对
 > 消费方：M6（会话编排调用 apply）、M8（消费遥测回调）
 
@@ -35,19 +35,25 @@ class BackendCapabilities:
     supports_param_streaming: bool   # 微事务参数流式生效（B+ 播放面）
     tweak_glitch_free: bool          # tweak 写入瞬间无输出毛刺/瞬断（H2/H3）
     doppler_phase_accumulate: bool   # 改写 ID4 不清相位积分器（H1）
+    # ★功率参考链（《T1-12》N5 裁定：输入功率声明制）
+    supports_input_power_measurement: bool  # 设备能否实测输入功率——当前 RF-SoC=False（遥测
+                                            #   input_level 为未标定原码，仅相对指示，T2-08 §2）；
+                                            #   P_in 以场景声明为锚（T2-06 §2），实测来源按本旗解锁
 
 RFSOC_CAPS = BackendCapabilities(   # 当前 RF-SoC 设备（《T1-12》#1/#5/N4）
     supports_time_varying=False, supports_cir=False,
     max_paths=24, grid="8x8", if_freq_max_hz=2.6e9,
     polarization="xpr_conducted", multi_frame_atomic=False,
     supports_param_streaming=False, tweak_glitch_free=False,      # 待硬件确认 H1–H4（《T1-12》§8b）——
-    doppler_phase_accumulate=False)                               #   确认前 B+ 播放被能力门拒（《T1-15》§7）
+    doppler_phase_accumulate=False,                               #   确认前 B+ 播放被能力门拒（《T1-15》§7）
+    supports_input_power_measurement=False)                       # 无输入实测——P_in 声明制（《T1-12》N5）
 ASC_CAPS = BackendCapabilities(     # .asc 文件后端：无设备物理限制
     supports_time_varying=True, supports_cir=True,
     max_paths=None, grid=None, if_freq_max_hz=None,
     polarization="full", multi_frame_atomic=True,
     supports_param_streaming=False, tweak_glitch_free=False,      # 文件后端无运行时流式概念——
-    doppler_phase_accumulate=False)                               #   A 档时变走 CIR 载荷，不经参数流
+    doppler_phase_accumulate=False,                               #   A 档时变走 CIR 载荷，不经参数流
+    supports_input_power_measurement=False)                       # 文件产物无运行时输入，无实测语义
 
 class DeviceBackend(Protocol):
     capabilities: BackendCapabilities

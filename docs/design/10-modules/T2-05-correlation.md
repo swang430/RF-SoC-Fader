@@ -1,7 +1,7 @@
 # T2-05 · M5 相关性合成（功能设计）
 
 > 第二册《功能设计》· 第 5 篇（L3 · 旗舰 B 方案核心算法）
-> 状态：**v1.0 · 已冻结**（2026-07-16，tag: design-t2-v1.0）
+> 状态：**v1.0 · 已冻结**（2026-07-16，tag: design-t2-v1.0）· §2/§3 已随《T1-12》N5（输入功率声明制）修订——FidelityReport 增 `channel_loss_db`/`shared_norm_gain_db`（归一化前保留绝对损耗，2026-07-19 PR）
 > 依据：《T1-06 MIMO 相关性（§6bis B 方案端到端）》《T1-03b 退化链》《T1-03c schema》（冻结基线）；依赖 **M4（T2-04）** 的 RT 模型/PortMap/量化合并函数集
 > 消费方：M6（编排调用）、M2（消费产出的 TDL 模型渲染）、M11（R 热图可视化）
 
@@ -60,6 +60,14 @@ class FidelityReport:                   # §5 数值核验产物
     frobenius_rel_err: float            # ‖R̂−R‖F / ‖R‖F
     per_channel_tap_counts: Mapping[tuple[int,int], int]
     quant: QuantReport                  # 量化丢弃统计（透传 M4）
+    channel_loss_db: Mapping[tuple[int,int], float | None]
+                                        # ★N5 功率参考链（《T1-12》N5，2026-07-19）：逐信道**绝对模型损耗**
+                                        #   ——在**全部 tap 幅度变更完成后**（含 M8 瑞利归一 hook 缩放）
+                                        #   由归一化域最终幅度 ×ref_power 折回绝对刻度（§3）；共享归一化
+                                        #   不丢绝对刻度、瑞利缩放不产生陈旧值；None=零功率守卫
+    shared_norm_gain_db: float          # Phase 4 共享基准施加的统一增益偏移（−10·log10(ref_power)）——
+                                        #   与 channel_loss_db 一起构成 M8 output_power_plan 的
+                                        #   model_loss_db 数据源（经 M6 resolve 传递，T2-06 §4/T2-08 §3.6）
 ```
 
 - 错误前置：`model.level ∉ {RT,GCM,CDL}` 拒（TDL 无需退化、CIR 走 A 档）；`single_reference` 而 `meta.arrays` 缺失拒；`mode=A` 走 §6 守卫。**portmap 入参与 `Meta.port_map`（v1.1）必须一致**——编排层（T2-06）传入的就是模型所携那份；不一致=调用方缺陷，拒（防两源漂移）。
@@ -122,6 +130,9 @@ def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 
     # Phase 4：★全系统共享归一化基准（正确性要点 2）——先全局扫描再归一
     ref_power = max(max(b.power for b in bins) for bins in binned.values())
     taps = {io: normalize(bins, ref=sqrt(ref_power)) for io, bins in binned.items()}
+                                                              # （★N5：绝对损耗快照**延后**到全部幅度变更之后——
+                                                              #   见 apply_doppler_and_rayleigh 后；shared_norm_gain_db
+                                                              #   =−10·log10(ref_power) 在此确定并随报告记录）
 
     # Phase 5：目标相关矩阵（供核验/GUI；R 不进设备帧——《T1-03b》）
     R_tx, R_rx = correlation_from_angles(model, model.meta.arrays, lam)  # §4
@@ -132,8 +143,17 @@ def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 
     # f_d=(f_c/c)(v_TX·k̂_TX−v_RX·k̂_RX)（旧单端 v·k̂/λ 为 RX-only 特例）；再缺 → default。瑞利谱 spec（归一化交 M8）
     apply_doppler_and_rayleigh(taps, cfg, lam)
 
+    # ★N5 绝对损耗快照——置于**全部 tap 幅度变更之后**（瑞利归一 hook（M8 §3.1）会再缩放幅度，
+    #   提前快照会让瑞利场景的 loss 陈旧）：归一化域最终幅度 ×ref_power 折回绝对刻度；
+    #   零功率守卫同前（p≤0 → None，「空 taps + 报告计数」语义，不成为失败点）
+    loss_db = {io: (-10*log10(p * ref_power) if (p := sum(abs(t.gain)**2 for t in ch)) > 0 else None)
+               for io, ch in taps.items()}
+
     tdl = assemble_tdl_model(model, taps, correlation=(R_tx,R_rx,R), reduced_from=model.id)
-    return tdl, verify_fidelity(tdl, R, quant)                    # §5
+    return tdl, verify_fidelity(tdl, R, quant,                    # §5
+                                loss_db, -10*log10(ref_power))    # ★N5：Phase 4 记录的绝对损耗与共享归一偏移
+                                                                  #   随报告返回（channel_loss_db/shared_norm_gain_db
+                                                                  #   两字段的赋值路径——不再是局部变量）
 ```
 
 **方向矢量约定**（天顶角体系，《T1-03c》）：`k̂(φ,θ) = [sinθ·cosφ, sinθ·sinφ, cosθ]`；
@@ -162,7 +182,8 @@ def correlation_from_angles(model, arrays, lam):
 ## 5. 数值核验（Phase 8 落地，验收核心）
 
 ```python
-def verify_fidelity(tdl, R_target, quant) -> FidelityReport:
+def verify_fidelity(tdl, R_target, quant, loss_db, shared_norm_gain_db) -> FidelityReport:
+    # loss_db/shared_norm_gain_db：Phase 4 透传（★N5 功率参考链）——核验不改动数值，原样入报告字段
     H = reconstruct_H(tdl)          # 由 taps 复增益反构窄带 MIMO 矩阵：H[m,n] = Σ_k gain_k(io=map(m,n))
     R_hat = outer(vec(H), conj(vec(H)))                # 单快照实现相关（确定性分量）
     R_hat /= trace(R_hat)/dim

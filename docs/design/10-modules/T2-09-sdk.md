@@ -1,7 +1,7 @@
 # T2-09 · M9 Python SDK（功能设计）
 
 > 第二册《功能设计》· 第 9 篇（L5 客户端：`cep_sdk`——REST 的 Python 封装）
-> 状态：**v1.0 · 已冻结**（2026-07-16，tag: design-t2-v1.0）
+> 状态：**v1.0 · 已冻结**（2026-07-16，tag: design-t2-v1.0）· §2 场景 create/new_version/读模型已随《T1-12》N5（输入功率声明制）增 `input_power` 修订（2026-07-19 PR）
 > 依据：《T1-04 §4 Python SDK》（冻结基线：封装 REST、语义与 REST 一一对应；「GUI 与第三方统一入口」的兑现面=同一 REST 合同+三前端一致性测试——Web GUI 为浏览器形态、运行时直连 REST 不经 SDK，T2-11 §2/《T1-14》§2 允许「SDK / REST」二择）
 > 消费方：第三方脚本、CI、演进后的 CLI；M11 GUI 为**语义对照方**（非运行时消费——GUI/SDK 调用序等价测试的另一端）；依赖：M7（REST/OpenAPI 契约——SDK 的唯一上游，**不直连 L3**）
 
@@ -33,8 +33,13 @@ job   = cep.imports.create_mpdb(mpdb_ref, arrays=..., portmap=..., import_cfg=..
 model = job.wait(timeout=...)                 # 轮询 GET /imports/{job}；失败抛 ImportFailedError（含源错误摘要）
 
 # —— 场景：版本不可变（T2-06 §2）
-scen  = cep.scenarios.create(source=..., synthesis=...)       # POST → version=1
-scen2 = scen.new_version(synthesis=...)                       # PUT → 新 version（原版永不变）
+scen  = cep.scenarios.create(source=..., synthesis=...,
+                             input_power=None)                # POST → version=1；input_power=可选输入功率声明
+                                                              #   （InputPowerDecl：逐端口 dBm+来源，T2-06 §2/《T1-12》N5
+                                                              #   ——不传则功率功能降级 relative，与 REST 载荷同字段）
+scen2 = scen.new_version(synthesis=..., input_power=...)      # PUT → 新 version（原版永不变）；input_power 同上可改
+                                                              #   （改声明=新 version）；读模型（scen.input_power）随
+                                                              #   GET 载荷回读——SDK 与 /v1 合同字段级同构
 scen  = cep.scenarios.get(scenario_id, version=None)          # 缺省最新
 
 # —— 会话（UC2 后半 + G4 多后端）

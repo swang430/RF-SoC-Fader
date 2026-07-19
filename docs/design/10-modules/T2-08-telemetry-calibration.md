@@ -135,8 +135,11 @@ class OutputPowerEntry:                   # 逐输出口评估条目
     mode: Literal["absolute", "relative"] # absolute=该口全部贡献输入已声明；relative=含未声明贡献
     predicted_pout_dbm: float | None      # absolute 时给（合路公式见下）；relative → None
     relative_loss_db: Mapping[int, float | None]
-                                          # 逐贡献输入口的相对损耗（model_loss−norm−g_out 链，声明无关、
-                                          #   恒可算）；None=零功率信道（T2-05 §3 守卫）
+                                          # 逐贡献输入口的端到端相对损耗（声明无关、恒可算）：
+                                          #   model_loss − shared_norm − g_out **+ bypass 插损**（★已标定
+                                          #   且 rf_mode 已知时**必须计入**——省略会让相对值乐观偏差一个
+                                          #   插损量；未标定/模式未知 → 该分量缺席且必有 uncalibrated
+                                          #   标注，不静默省略）；None=零功率信道（T2-05 §3 守卫）
     snr_db: float | None                  # absolute 且 AWGN 在场（ID8 开）时给；分母仅 ID9（见下）
     uncertainty_db: Mapping[str, float] | None
                                           # absolute 时给，分解键：declared（声明精度，按来源标注）/

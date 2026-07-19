@@ -62,8 +62,9 @@ class FidelityReport:                   # §5 数值核验产物
     quant: QuantReport                  # 量化丢弃统计（透传 M4）
     channel_loss_db: Mapping[tuple[int,int], float | None]
                                         # ★N5 功率参考链（《T1-12》N5，2026-07-19）：逐信道**绝对模型损耗**
-                                        #   ——Phase 4 归一化【前】的信道功率折 dB（相对单位输入）；共享
-                                        #   归一化会丢绝对刻度，此处显式保留
+                                        #   ——在**全部 tap 幅度变更完成后**（含 M8 瑞利归一 hook 缩放）
+                                        #   由归一化域最终幅度 ×ref_power 折回绝对刻度（§3）；共享归一化
+                                        #   不丢绝对刻度、瑞利缩放不产生陈旧值；None=零功率守卫
     shared_norm_gain_db: float          # Phase 4 共享基准施加的统一增益偏移（−10·log10(ref_power)）——
                                         #   与 channel_loss_db 一起构成 M8 output_power_plan 的
                                         #   model_loss_db 数据源（经 M6 resolve 传递，T2-06 §4/T2-08 §3.6）
@@ -128,15 +129,10 @@ def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 
 
     # Phase 4：★全系统共享归一化基准（正确性要点 2）——先全局扫描再归一
     ref_power = max(max(b.power for b in bins) for bins in binned.values())
-    loss_db = {io: (-10*log10(p) if (p := sum(b.power for b in bins)) > 0 else None)
-               for io, bins in binned.items()}                # ★归一化前先记逐信道绝对损耗（N5 功率参考链）——
-                                                              #   normalize 丢绝对刻度，入 FidelityReport.channel_loss_db
-                                                              #   （shared_norm_gain_db=−10·log10(ref_power) 同记）。
-                                                              #   ★零功率守卫：p≤0（相干对消等）不取 log10——该信道
-                                                              #   loss 记 None（沿「空 taps + 报告计数」既有语义，§6，
-                                                              #   不成为 resolve 失败点）；M8 计划对 None 信道按 0 W
-                                                              #   贡献跳过（对消信道恰无功率输出，语义精确）
     taps = {io: normalize(bins, ref=sqrt(ref_power)) for io, bins in binned.items()}
+                                                              # （★N5：绝对损耗快照**延后**到全部幅度变更之后——
+                                                              #   见 apply_doppler_and_rayleigh 后；shared_norm_gain_db
+                                                              #   =−10·log10(ref_power) 在此确定并随报告记录）
 
     # Phase 5：目标相关矩阵（供核验/GUI；R 不进设备帧——《T1-03b》）
     R_tx, R_rx = correlation_from_angles(model, model.meta.arrays, lam)  # §4
@@ -146,6 +142,12 @@ def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 
     # 功率加权聚合入 Tap.doppler_hz（T2-04 §5）；缺失且给 velocity_tx/rx_mps → 双端投影重算
     # f_d=(f_c/c)(v_TX·k̂_TX−v_RX·k̂_RX)（旧单端 v·k̂/λ 为 RX-only 特例）；再缺 → default。瑞利谱 spec（归一化交 M8）
     apply_doppler_and_rayleigh(taps, cfg, lam)
+
+    # ★N5 绝对损耗快照——置于**全部 tap 幅度变更之后**（瑞利归一 hook（M8 §3.1）会再缩放幅度，
+    #   提前快照会让瑞利场景的 loss 陈旧）：归一化域最终幅度 ×ref_power 折回绝对刻度；
+    #   零功率守卫同前（p≤0 → None，「空 taps + 报告计数」语义，不成为失败点）
+    loss_db = {io: (-10*log10(p * ref_power) if (p := sum(abs(t.gain)**2 for t in ch)) > 0 else None)
+               for io, ch in taps.items()}
 
     tdl = assemble_tdl_model(model, taps, correlation=(R_tx,R_rx,R), reduced_from=model.id)
     return tdl, verify_fidelity(tdl, R, quant,                    # §5

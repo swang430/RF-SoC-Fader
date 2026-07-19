@@ -127,6 +127,29 @@ def overflow_guard(snap: TelemetrySnapshot) -> list[Advice]:
 ```python
 # 链条：P_in（场景声明，T2-06 §2 InputPowerDecl）→ 信道模型损耗（TDL 归一化，已知）
 #       → 输出衰减/逐径幅值码值（code↔dB 经校准）→ P_out = 计算值 ± 不确定度
+
+@dataclass(frozen=True)
+class OutputPowerEntry:                   # 逐输出口评估条目
+    mode: Literal["absolute", "relative"] # absolute=该口全部贡献输入已声明；relative=含未声明贡献
+    predicted_pout_dbm: float | None      # absolute 时给（合路公式见下）；relative → None
+    relative_loss_db: Mapping[int, float | None]
+                                          # 逐贡献输入口的相对损耗（model_loss−norm−g_out 链，声明无关、
+                                          #   恒可算）；None=零功率信道（T2-05 §3 守卫）
+    snr_db: float | None                  # absolute 且 AWGN 在场（ID8 开）时给；分母仅 ID9（见下）
+    uncertainty_db: Mapping[str, float] | None
+                                          # absolute 时给，分解键：declared（声明精度，按来源标注）/
+                                          #   calibration（code↔dB 定标，HR-CAL-001）/ bypass（N2 插损）
+    missing_ports: tuple[int, ...] = ()   # 未声明的贡献输入口（GUI 引导补声明，T2-11 §3④）
+
+@dataclass(frozen=True)
+class PowerPlan:                          # §3.6 产物——「现状评估」与「目标规划」共用形；
+                                          #   ★进 /v1 OpenAPI 响应 schema（GET /sessions/{id} 的
+                                          #   power_plan 字段形，T2-07 §2——黄金 diff 盯住，防三方漂移）
+    scope: Literal["device", "model_only"]
+                                          # model_only=asc 产物（无输出级设置，只承诺模型损耗链）
+    per_output: Mapping[int, OutputPowerEntry]       # 键=协议输出端编号（0–7）
+    target_advice: Mapping[str, float] | None = None # 目标规划形态的设置建议（本期无 API 接线，
+                                          #   随功率工作流升版启用——范围裁定见下）
 def output_power_plan(p_in: InputPowerDecl | None,
                       model_loss_db: Mapping[ChannelKey, float],     # M5 产物：逐信道**绝对**模型损耗——
                                                                      #   FidelityReport.channel_loss_db（Phase 4 归一化

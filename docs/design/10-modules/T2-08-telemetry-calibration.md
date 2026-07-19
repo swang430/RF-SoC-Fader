@@ -242,7 +242,7 @@ CalibrationService.channel_loss_db_of(model) -> Mapping[ChannelKey, float | None
                                                              # （None=零功率信道守卫，与 §3.6 签名一致）
 ```
 
-> `input_level_advice` 本期仅经 M10 配置转化为告警阈值与 GUI 提示文案（《T1-12》N1），无直接 REST 用户面；若需只读端点随 S1 回路向 M7 回馈。
+> `input_level_advice` 本期仅作 **GUI/运营者指引文案**（dBm 人读，《T1-12》N1）——★N5 修订：**不**转化为 §2.2 告警阈值（码↔dBm 未标定 §8-1；码域阈值由运营者在 M10 **原码**配置，与指引无换算关系）；无直接 REST 用户面，若需只读端点随 S1 回路向 M7 回馈。
 
 ---
 

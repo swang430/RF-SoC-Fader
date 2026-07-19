@@ -144,9 +144,10 @@ def output_power_plan(p_in: InputPowerDecl | None,
                                                                      #   ★输出口合路（8×8 多输入并入同输出）：
                                                                      #   P_out[o] = 10·log10(Σ_i 10^(C[i,o]/10))——先线性瓦
                                                                      #   求和再回 dBm，单对公式仅单贡献特例（逐 dB 直加会
-                                                                     #   低报多输入输出口）；SNR 分子=该合路和、分母=AWGN
-                                                                     #   设置功率（码值域绝对，经 M1 折 dBm，不受 ID11 衰减
-                                                                     #   影响——协议注明衰减不作用于 AWGN）
+                                                                     #   低报多输入输出口）；SNR 分子=该合路和、分母=**仅
+                                                                     #   ID9（AWGN_POWER）**折 dBm（经 M1；ID8 使能只门控
+                                                                     #   在场与否、不入分母；不受 ID11 幅值系数影响——
+                                                                     #   协议注明其不作用于 AWGN）
                                                                      #   ★部分声明（P_in 未覆盖全部在用输入口）：不失败、
                                                                      #   也绝不把未声明贡献按 0 W 计入——**逐输出口**判定：
                                                                      #   全部贡献输入已声明 → 该口 absolute；含未声明贡献 →
@@ -174,7 +175,9 @@ def output_power_plan(p_in: InputPowerDecl | None,
     #     ⊕ bypass/插损（N2））——不确定度来源诚实呈现，GUI 直译（T2-11 §3④）
     # ★p_in=None（未声明）→ 降级：仅受理 TargetLossDb（相对损耗）；
     #   TargetPoutDbm/TargetSnrDb → 抛 InputPowerUndeclared（指引到场景声明字段）
-    # ★SNR 目标同锚：AWGN 功率（ID8/9）是绝对码值域，信号功率取自声明链——
+    # ★SNR 目标同锚：AWGN 功率是绝对码值域——**噪声功率只取 ID9（AWGN_POWER，1/4096）**，
+    #   ID8（AWGN_ENABLE）仅门控噪声是否在场、**不入分母**（ID8 关 → 无噪声，SNR 语义不可算，
+    #   不得把使能位/关断态当功率码折算）；信号功率取自声明链——
     #   无声明 P_in 时 SNR 语义不可用（同上错误）；不得以遥测 input_level 顶替（§2 语义裁定）
     # ★涉 bypass 依赖路径且 N2 未标定 → UncalibratedError（§3.2 语义，绝不按默认估算）
     # 消费点：M6 resolve 管线（「现状评估」形态挂 ResolvedArtifacts.power_plan，经既有会话查询面

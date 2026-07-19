@@ -132,10 +132,15 @@ def output_power_plan(p_in: InputPowerDecl | None,
                                                                      #   FidelityReport.channel_loss_db（Phase 4 归一化
                                                                      #   前记录，T2-05 §2/§3；shared_norm_gain_db 供
                                                                      #   实现域还原）——共享归一化不丢绝对刻度的保证
+                      rendered: RenderedPowerSettings | None = None,
                       target: TargetPoutDbm | TargetLossDb | TargetSnrDb | None = None) -> PowerPlan:
-    # ★target=None →「现状评估」形态：按产物当前衰减设置计算——声明在场 → predicted_pout±不确定度
-    #   （PowerPlan.mode="absolute"）；未声明 → 仅相对损耗（mode="relative"，不报错——评估无绝对请求）。
+    # rendered=产物功率设置摘要（输出衰减 ID10/11、逐径幅值缩放、AWGN 功率码——取自 M2 render 产物的
+    #   manifest 摘要投影：产物已含全部帧参数，纯提取不新增信息；写域码值折 dB 调 M1 唯一定义）
+    # ★target=None →「现状评估」形态（此时 rendered **必传**——预测的是将下发产物的实际 P_out，
+    #   不是无设置的裸模型）：声明在场 → predicted_pout±不确定度（PowerPlan.mode="absolute"）；
+    #   未声明 → 仅相对损耗（mode="relative"，不报错——评估无绝对请求）。
     #   M6 resolve 即以此形态计算并挂 ResolvedArtifacts.power_plan（T2-06 §2，经 GET /sessions/{id} 直出）
+    # ★target 给定 →「目标规划」形态（rendered 可 None）：反解输出衰减/幅值设置建议以达 target
     # 产出 PowerPlan：输出衰减建议（dB，写域码值换算调 M1 唯一定义）+ predicted_pout_dbm
     #   + uncertainty（分解可见：声明精度（按 source 标注）⊕ code↔dB 定标（HR-CAL-001，T3-03）
     #     ⊕ bypass/插损（N2））——不确定度来源诚实呈现，GUI 直译（T2-11 §3④）

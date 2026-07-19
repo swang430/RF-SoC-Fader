@@ -198,7 +198,10 @@ async def resolve(sess) -> ResolvedArtifacts:
                                                          # ★直通 TDL/CIR（reduce 不跑、fidelity=None）：从 canonical
                                                          #   model 逐信道 Σ|gain|² 折 dB 直取（T2-08 §3.6 纯函数——
                                                          #   直通表幅度即模型意图，无归一化偏移，不解引用 None）
-    plan = calibration.output_power_plan(scen.input_power, loss)   # ★N5「现状评估」（target=None，T2-08 §3.6）；
+    plan = calibration.output_power_plan(scen.input_power, loss,
+                rendered=power_settings_of(artifact))    # ★N5「现状评估」（target=None，T2-08 §3.6）：rendered=
+                                                         #   产物功率设置摘要（输出衰减/幅值缩放/AWGN 码——manifest
+                                                         #   既有摘要的投影，评估的是**将下发的产物**而非裸模型）；
                                                          #   未声明 P_in → mode="relative"（不报错）；纯函数零设备触达
     arts = ResolvedArtifacts(model.id, artifact, hash_of(artifact), collect_reports(rep, fidelity),
                              power_plan=plan)

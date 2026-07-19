@@ -144,7 +144,10 @@ def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 
     apply_doppler_and_rayleigh(taps, cfg, lam)
 
     tdl = assemble_tdl_model(model, taps, correlation=(R_tx,R_rx,R), reduced_from=model.id)
-    return tdl, verify_fidelity(tdl, R, quant)                    # §5
+    return tdl, verify_fidelity(tdl, R, quant,                    # §5
+                                loss_db, -10*log10(ref_power))    # ★N5：Phase 4 记录的绝对损耗与共享归一偏移
+                                                                  #   随报告返回（channel_loss_db/shared_norm_gain_db
+                                                                  #   两字段的赋值路径——不再是局部变量）
 ```
 
 **方向矢量约定**（天顶角体系，《T1-03c》）：`k̂(φ,θ) = [sinθ·cosφ, sinθ·sinφ, cosθ]`；
@@ -173,7 +176,8 @@ def correlation_from_angles(model, arrays, lam):
 ## 5. 数值核验（Phase 8 落地，验收核心）
 
 ```python
-def verify_fidelity(tdl, R_target, quant) -> FidelityReport:
+def verify_fidelity(tdl, R_target, quant, loss_db, shared_norm_gain_db) -> FidelityReport:
+    # loss_db/shared_norm_gain_db：Phase 4 透传（★N5 功率参考链）——核验不改动数值，原样入报告字段
     H = reconstruct_H(tdl)          # 由 taps 复增益反构窄带 MIMO 矩阵：H[m,n] = Σ_k gain_k(io=map(m,n))
     R_hat = outer(vec(H), conj(vec(H)))                # 单快照实现相关（确定性分量）
     R_hat /= trace(R_hat)/dim

@@ -1,7 +1,7 @@
 # T2-08 · M8 遥测与校准（功能设计）
 
 > 第二册《功能设计》· 第 8 篇（L3：遥测消费服务 + 数值校准域）
-> 状态：**v1.0 · 已冻结**（2026-07-16，tag: design-t2-v1.0）
+> 状态：**v1.0 · 已冻结**（2026-07-16，tag: design-t2-v1.0）· §2/§3/§4/§6/§7 已随《T1-12》N5（输入功率声明制）修订——遥测输入字段语义降级 + §3.6 输出功率计划（2026-07-19 PR）
 > 依据：《T1-11 §2 可观测性 · §4 校准》《T1-12 风险台账 #2/N1/N2》（冻结基线）；T2-01 `TelemetryFrame`、T2-02 遥测分发与连接级节奏、T2-07 声明的消费接口（本篇为其规范）
 > 消费方：M7（`/telemetry` 快照 + SSE 流）、M11 GUI ⑤遥测面板、M6（活性/告警联动展示）；依赖：M1（帧解析与单位换算，唯一定义）、M2（遥测回调分发）、M10（告警规则/校准表配置承载）
 
@@ -12,7 +12,7 @@
 M8 由两半组成，共享「数值域」职责、零设备写操作：
 
 - **遥测服务（TelemetryService）**：消费 M2 分发的 `TelemetryFrame`（131B，M1 已解析为类型化字段）→ 归一为物理量快照 → 环形缓冲（事件流）→ 快照查询 / SSE 订阅 / 告警引擎——兑现 T2-07 §2 先行声明的 `get_snapshot` / `subscribe` 接口。
-- **校准域（CalibrationService）**：纯数值计算——瑞利谱型功率归一化、bypass 衰减表、输入电平指引、输出溢出建议、量化误差聚合。**只产出数值与建议，不触设备**（自动动作列开放问题，同 T2-06 §9-2 口径：本期只告警）。
+- **校准域（CalibrationService）**：纯数值计算——瑞利谱型功率归一化、bypass 衰减表、输入电平指引、输出溢出建议、输出功率计划（§3.6 功率参考链）、量化误差聚合。**只产出数值与建议，不触设备**（自动动作列开放问题，同 T2-06 §9-2 口径：本期只告警）。
 
 **非职责**：字节解析（M1）、TCP 传输与遥测节奏（M2 连接级配置，见 §5）、码值↔物理量换算的**定义**（L1 唯一定义，M8 只调用）、会话编排（M6）、物理 RF 定标测量（《T1-01》本期范围外）。
 
@@ -46,6 +46,7 @@ class TelemetryService:
 ```
 
 - **码值→物理量**：`input_level`(0–2048)/`output_level`(0–32768)/功率字段的标定映射**补充定义于 M1 单位换算层**（M8 调用不重定义，CLAUDE.md 约定）；docx 未明含义的字段先以原码透出 + `raw` 全保留（开放问题 §8-1），**不猜换算**。
+- **★输入侧语义裁定（《T1-12》N5，2026-07-19）**：设备**无输入功率实测能力**——`input_level`/输入功率字段仅作**相对指示**（基线漂移监视、§2.2 越限告警的迟滞输入），ADC 过载位图为**硬信号**（布尔可信）；两者均**不构成输入功率测量**，绝对功率语义（输出功率/SNR）一律锚定场景声明 P_in（§3.6 功率参考链，T2-06 §2 `InputPowerDecl`）。
 - **域检查**：字段超出协议域（如 level>2048）视为帧疑损坏——丢弃该帧并计数告警（不入缓冲，不崩溃）。
 
 ### 2.2 告警引擎
@@ -121,6 +122,26 @@ def overflow_guard(snap: TelemetrySnapshot) -> list[Advice]:
 
 - 消费 M4/M5 的 `QuantReport`（时延格点丢弃）+ 幅度（1/32768）/相位（2π/4096）/多普勒格点的舍入统计 → 每模型「校准注记」（数值保真报告，随 FidelityReport 同面展示）。M8 **不重算**编码——聚合上游报告。
 
+### 3.6 输出功率计划（功率参考链——《T1-12》N5：输入功率声明制）
+
+```python
+# 链条：P_in（场景声明，T2-06 §2 InputPowerDecl）→ 信道模型损耗（TDL 归一化，已知）
+#       → 输出衰减/逐径幅值码值（code↔dB 经校准）→ P_out = 计算值 ± 不确定度
+def output_power_plan(p_in: InputPowerDecl | None,
+                      model_loss_db: Mapping[ChannelKey, float],     # M5 产物：逐信道模型损耗
+                      target: TargetPoutDbm | TargetLossDb | TargetSnrDb) -> PowerPlan:
+    # 产出 PowerPlan：输出衰减建议（dB，写域码值换算调 M1 唯一定义）+ predicted_pout_dbm
+    #   + uncertainty（分解可见：声明精度（按 source 标注）⊕ code↔dB 定标（HR-CAL-001，T3-03）
+    #     ⊕ bypass/插损（N2））——不确定度来源诚实呈现，GUI 直译（T2-11 §3④）
+    # ★p_in=None（未声明）→ 降级：仅受理 TargetLossDb（相对损耗）；
+    #   TargetPoutDbm/TargetSnrDb → 抛 InputPowerUndeclared（指引到场景声明字段）
+    # ★SNR 目标同锚：AWGN 功率（ID8/9）是绝对码值域，信号功率取自声明链——
+    #   无声明 P_in 时 SNR 语义不可用（同上错误）；不得以遥测 input_level 顶替（§2 语义裁定）
+    # ★涉 bypass 依赖路径且 N2 未标定 → UncalibratedError（§3.2 语义，绝不按默认估算）
+    # 消费点：M6 resolve 管线（PowerPlan 随 ResolvedArtifacts 附带，经既有 dry-run/会话
+    #   查询面呈现——不新增 REST 端点）；纯函数，不触设备
+```
+
 ---
 
 ## 4. 接口汇总（按消费方分组）
@@ -134,6 +155,8 @@ CalibrationService.rayleigh_norm_gain(taps_coeffs, mode="per_tap") -> tuple[floa
 CalibrationService.bypass_atten_db(mode) -> float            # UncalibratedError 语义
 CalibrationService.input_level_advice(papr_db=...) -> LevelAdvice
 CalibrationService.overflow_guard(snapshot) -> list[Advice]
+CalibrationService.output_power_plan(p_in, model_loss_db, target) -> PowerPlan   # §3.6 功率参考链
+                                                             # InputPowerUndeclared / UncalibratedError 语义
 ```
 
 > `input_level_advice` 本期仅经 M10 配置转化为告警阈值与 GUI 提示文案（《T1-12》N1），无直接 REST 用户面；若需只读端点随 S1 回路向 M7 回馈。
@@ -154,6 +177,7 @@ CalibrationService.overflow_guard(snapshot) -> list[Advice]
 | :-- | :-- |
 | 帧字段超协议域 | 丢弃 + 计数 +（超率阈值时）`frame_corrupt` 告警——不入缓冲不崩溃 |
 | 未标定 bypass 表访问 | `UncalibratedError`（显式上抛；错误指明待硬件数值项 N2） |
+| 未声明输入功率 | 绝对 P_out/SNR 目标请求而场景无 `InputPowerDecl` → `InputPowerUndeclared`（指引到场景声明字段；相对损耗路径不受限——§3.6 降级面） |
 | 订阅者慢消费 | 丢最旧 + 补 `resync`（采集路径永不被下游阻塞） |
 | 设备静默 | `device_silent` 告警（活性）；`get_snapshot` 返回最近帧+陈旧时长标注 |
 | 无任何遥测数据 | `get_snapshot` 返 None（区分「无数据」与「设备错误」）——HTTP 语义已由 T2-07 §2 裁决：已注册无数据→204、未注册→404 |
@@ -172,6 +196,7 @@ CalibrationService.overflow_guard(snapshot) -> list[Advice]
 | **谱归一黄金** | Jakes 谱与平坦谱混合的多 Tap 系数组 | 增益与解析能量比一致（1e-12 容差）；per_tap 逐 Tap 各异、total 全同且保持 Tap 间相对功率 |
 | **bypass 未标定** | None 表调用 | UncalibratedError 且指明 N2 |
 | **电平指引** | PAPR 参数扫描（含 >10 dB） | 建议区间单调、不超 ADC 上限；PAPR>10 dB 返回 feasible=False（绝不产生倒置区间） |
+| **功率计划** | 声明 P_in × 三类目标（P_out/损耗/SNR）矩阵；未声明降级分支；N2 未标定分支 | 衰减建议与 predicted_pout 自洽且不确定度分解齐全；未声明时绝对目标抛 `InputPowerUndeclared` 而相对损耗可用；bypass 依赖路径抛 `UncalibratedError`（不按默认估算） |
 | **溢出建议** | 构造合路溢出快照 | Advice 定位正确、建议衰减量 ≥ 反推下限 |
 
 ---

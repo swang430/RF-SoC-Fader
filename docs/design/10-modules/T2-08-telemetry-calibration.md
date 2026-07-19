@@ -135,9 +135,12 @@ def output_power_plan(p_in: InputPowerDecl | None,
                       shared_norm_gain_db: float = 0.0,              # M5 Phase 4 共享基准偏移（直通模型=0）——
                                                                      #   rendered 设置作用在【归一化域】。绝对链逐贡献：
                                                                      #   C[i,o] = P_in[i] − model_loss[i,o] + shared_norm_gain
-                                                                     #            − atten_db[o]（★ID11 输出衰减为**损耗**、
-                                                                     #            显式作减——取加号会把加大衰减算成升功率；
-                                                                     #            衰减码折 dB 经 M1，恒 ≥0）
+                                                                     #            + g_out_db[o]（★ID11 是**线性输出幅值系数**
+                                                                     #            ——码值/16384，T2-01「输出幅值」语义——折
+                                                                     #            **有符号增益** g_out_db=20·log10(coef)：
+                                                                     #            coef<1 衰减（负 dB）、coef>1 增益（正 dB）；
+                                                                     #            不得当「非负衰减 dB」作减也不得无符号作加，
+                                                                     #            系数↔dB 换算经 M1 唯一定义）
                                                                      #   ★输出口合路（8×8 多输入并入同输出）：
                                                                      #   P_out[o] = 10·log10(Σ_i 10^(C[i,o]/10))——先线性瓦
                                                                      #   求和再回 dBm，单对公式仅单贡献特例（逐 dB 直加会
@@ -150,7 +153,8 @@ def output_power_plan(p_in: InputPowerDecl | None,
                                                                      #   该口降 relative 并列 missing_ports（引导补声明）
                       rendered: RenderedPowerSettings | None = None,
                       target: TargetPoutDbm | TargetLossDb | TargetSnrDb | None = None) -> PowerPlan:
-    # rendered=产物**输出级**功率设置摘要（输出衰减 ID11——ID10 为输出使能、不入预算——与 AWGN 功率码；
+    # rendered=产物**输出级**功率设置摘要（输出幅值系数 ID11（线性，写域 1/16384；<1 衰减）——ID10 为
+    #   输出使能、不入预算——与 AWGN 功率码；
     #   取自 M2 render 产物的 manifest 摘要投影：产物已含全部帧参数，纯提取不新增信息；写域码值折 dB
     #   调 M1 唯一定义）。★不含逐径幅值：径幅即归一化模型本体，已由 model_loss_db+shared_norm_gain_db
     #   承载——再计入 rendered 即双计（低于共享基准 10 dB 的信道会被错报成 −20 dB）

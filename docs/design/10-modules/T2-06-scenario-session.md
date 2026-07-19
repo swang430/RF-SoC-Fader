@@ -115,10 +115,13 @@ class ResolvedArtifacts:
                                          #   GET /sessions/{id} 直出（T2-07 §2），GUI 功率链呈现数据源（T2-11 §3④）。
                                          #   ★不参与 artifact_hash/缓存键——校准数据（M10 版本化）变更时
                                          #   缓存命中重算（§4）。★读时派生：GET /sessions/{id} 出流的
-                                         #   power_plan 由 M6 **读时重算**——当前校准 + rendered ⊕ committed
-                                         #   tweaks 覆盖（§4bis 径幅微调改变实际设置）——纯函数零触达；
-                                         #   本存储值仅为 resolve 期快照（provenance），不直接出流，
-                                         #   tweak/校准更新后读侧不陈旧
+                                         #   power_plan 由 M6 **读时以设备现态重算**（纯函数零触达）——
+                                         #   现态 = artifact ⊕ committed tweaks（§4bis）：**幅度类 tweak
+                                         #   改逐径幅度 → model_loss 项以现态逐径幅度重求 Σ|gain|² 重建**
+                                         #   （径幅不在 rendered 内（T2-08 §3.6），只覆盖 rendered 不够——
+                                         #   否则幅度 tweak 后 P_out 仍是 resolve 时值）；输出级设置项
+                                         #   同以现态投影；校准取当前表。本存储值仅为 resolve 期快照
+                                         #   （provenance），不直接出流，tweak/校准更新后读侧不陈旧
 ```
 
 - **client_key 不入 Scenario**：EngineSource 持 **GenerateSpec**（GenerateRequest 去 `client_key` 的物理配置投影，类型层面排除、而非约定不填）；每次提交由 M6 生成新 UUID 补全为完整 GenerateRequest（与 T2-03 §3「provenance 剔除 client_key」同口径）——物理配置与传输键分离，scenario 判等不受提交次数影响。

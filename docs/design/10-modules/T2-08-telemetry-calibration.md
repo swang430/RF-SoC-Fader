@@ -141,6 +141,10 @@ def output_power_plan(p_in: InputPowerDecl | None,
     #   未声明 → 仅相对损耗（mode="relative"，不报错——评估无绝对请求）。
     #   M6 resolve 即以此形态计算并挂 ResolvedArtifacts.power_plan（T2-06 §2，经 GET /sessions/{id} 直出）
     # ★target 给定 →「目标规划」形态（rendered 可 None）：反解输出衰减/幅值设置建议以达 target
+    # ★范围裁定（诚实边界）：目标规划形态本期为**内部纯函数能力**（形态先行保留，同通用平台原则）——
+    #   /v1 合同**未**暴露 target 载荷（T2-07 仅暴露场景 input_power 声明 + 会话只读 power_plan）；
+    #   前端接线（载荷落点候选：Scenario.power_target「配置即数据」或会话级 plan 端点）随 DP-01
+    #   功率工作流条目落地，落定走升版——本期任何前端不产生 target 调用路径
     # 产出 PowerPlan：输出衰减建议（dB，写域码值换算调 M1 唯一定义）+ predicted_pout_dbm
     #   + uncertainty（分解可见：声明精度（按 source 标注）⊕ code↔dB 定标（HR-CAL-001，T3-03）
     #     ⊕ bypass/插损（N2））——不确定度来源诚实呈现，GUI 直译（T2-11 §3④）
@@ -170,7 +174,9 @@ CalibrationService.rayleigh_norm_gain(taps_coeffs, mode="per_tap") -> tuple[floa
 CalibrationService.bypass_atten_db(mode) -> float            # UncalibratedError 语义
 CalibrationService.input_level_advice(papr_db=...) -> LevelAdvice
 CalibrationService.overflow_guard(snapshot) -> list[Advice]
-CalibrationService.output_power_plan(p_in, model_loss_db, target) -> PowerPlan   # §3.6 功率参考链
+CalibrationService.output_power_plan(p_in, model_loss_db,
+                                     rendered=None, target=None) -> PowerPlan    # §3.6 功率参考链——
+                                                             # 现状评估（target=None）rendered 必传；
                                                              # InputPowerUndeclared / UncalibratedError 语义
 CalibrationService.channel_loss_db_of(model) -> Mapping[ChannelKey, float]       # §3.6 直通 TDL/CIR 回退源
 ```

@@ -291,7 +291,7 @@ CalibrationService.channel_loss_db_of(model) -> Mapping[ChannelKey, float | None
 | 场景 | 处置 |
 | :-- | :-- |
 | 帧字段超协议域 | 丢弃 + 计数 +（超率阈值时）`frame_corrupt` 告警——不入缓冲不崩溃 |
-| 未标定 bypass 表访问 | `UncalibratedError`（显式上抛；错误指明待硬件数值项 N2） |
+| 未标定 bypass 表访问 | `UncalibratedError`（显式上抛；错误指明待硬件数值项 N2）——**适用面：直接表访问（`bypass_atten_db`）与显式绝对 target 规划**；★§3.6 现状评估（target=None）**除外**：不抛、受影响口降 relative + `uncalibrated` 标注（resolve 不失败，READY/apply 保持可达） |
 | 未声明输入功率 | 绝对 P_out/SNR 目标请求而场景无 `InputPowerDecl` → `InputPowerUndeclared`（指引到场景声明字段；相对损耗路径不受限——§3.6 降级面） |
 | 订阅者慢消费 | 丢最旧 + 补 `resync`（采集路径永不被下游阻塞） |
 | 设备静默 | `device_silent` 告警（活性）；`get_snapshot` 返回最近帧+陈旧时长标注 |

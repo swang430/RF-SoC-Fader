@@ -133,9 +133,14 @@ def output_power_plan(p_in: InputPowerDecl | None,
                                                                      #   前记录，T2-05 §2/§3；shared_norm_gain_db 供
                                                                      #   实现域还原）——共享归一化不丢绝对刻度的保证
                       shared_norm_gain_db: float = 0.0,              # M5 Phase 4 共享基准偏移（直通模型=0）——
-                                                                     #   rendered 设置作用在【归一化域】，绝对链还原：
-                                                                     #   P_out = P_in − model_loss + shared_norm_gain
-                                                                     #           + rendered 输出级设置折 dB（写域经 M1）
+                                                                     #   rendered 设置作用在【归一化域】。绝对链逐贡献：
+                                                                     #   C[i,o] = P_in[i] − model_loss[i,o] + shared_norm_gain
+                                                                     #            + rendered 输出级设置折 dB（写域经 M1）
+                                                                     #   ★输出口合路（8×8 多输入并入同输出）：
+                                                                     #   P_out[o] = 10·log10(Σ_i 10^(C[i,o]/10))——先线性瓦
+                                                                     #   求和再回 dBm，单对公式仅单贡献特例（逐 dB 直加会
+                                                                     #   低报多输入输出口）；SNR 分子=该合路和、分母=AWGN
+                                                                     #   设置功率（码值域绝对，经 M1 折 dBm）
                       rendered: RenderedPowerSettings | None = None,
                       target: TargetPoutDbm | TargetLossDb | TargetSnrDb | None = None) -> PowerPlan:
     # rendered=产物**输出级**功率设置摘要（输出衰减 ID11——ID10 为输出使能、不入预算——与 AWGN 功率码；

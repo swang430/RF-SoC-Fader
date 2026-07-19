@@ -151,7 +151,9 @@ class PowerPlan:                          # §3.6 产物——「现状评估」
     target_advice: Mapping[str, float] | None = None # 目标规划形态的设置建议（本期无 API 接线，
                                           #   随功率工作流升版启用——范围裁定见下）
 def output_power_plan(p_in: InputPowerDecl | None,
-                      model_loss_db: Mapping[ChannelKey, float],     # M5 产物：逐信道**绝对**模型损耗——
+                      model_loss_db: Mapping[ChannelKey, float | None],  # M5 产物：逐信道**绝对**模型损耗
+                                                                     #   （None=零功率信道，T2-05 §3 守卫——生产侧
+                                                                     #   即产 None，签名必须收，0 W 跳过在本函数内）——
                                                                      #   FidelityReport.channel_loss_db（Phase 4 归一化
                                                                      #   前记录，T2-05 §2/§3；shared_norm_gain_db 供
                                                                      #   实现域还原）——共享归一化不丢绝对刻度的保证
@@ -186,8 +188,9 @@ def output_power_plan(p_in: InputPowerDecl | None,
     # ★target=None →「现状评估」形态：rendered 对 **rfsoc 帧产物必传**（预测将下发产物的实际 P_out，
     #   不是无设置的裸模型）；**asc 产物（AscFileSet 无帧/输出级设置）rendered=None 合法** → plan 标注
     #   scope="model_only"（.asc 绝对功率由回放设备定标，平台只承诺模型损耗链）。
-    #   声明在场 → predicted_pout±不确定度（PowerPlan.mode="absolute"）；
-    #   未声明 → 仅相对损耗（mode="relative"，不报错——评估无绝对请求）。
+    #   ★absolute/relative 是**逐输出口**属性（`per_output[o].mode`，无全局 mode——混合声明时
+    #   各口独立判定）：该口全部贡献输入已声明 → mode="absolute"（predicted_pout±不确定度）；
+    #   含未声明贡献 → 该口 mode="relative"（仅相对损耗，不报错——评估无绝对请求）。
     #   M6 resolve 即以此形态计算并挂 ResolvedArtifacts.power_plan（T2-06 §2，经 GET /sessions/{id} 直出）
     # ★target 给定 →「目标规划」形态（rendered 可 None）：反解输出衰减/幅值设置建议以达 target
     # ★范围裁定（诚实边界）：目标规划形态本期为**内部纯函数能力**（形态先行保留，同通用平台原则）——

@@ -110,7 +110,8 @@ class ResolvedArtifacts:
     reports: Reports                     # {import|engine, fidelity?, quant?}——M3/M4/M5 报告透传（GUI 展示）
     power_plan: PowerPlan | None = None  # ★功率参考链评估（M8 §3.6「现状评估」形态，《T1-12》N5）——resolve 期
                                          #   以场景声明 P_in + 模型损耗（含共享归一偏移）+ 产物衰减设置计算；
-                                         #   未声明 P_in 时为相对损耗模式（PowerPlan.mode="relative"）；经
+                                         #   未声明贡献的输出口逐口降相对损耗（per_output[o].mode="relative"，
+                                         #   T2-08 §3.6——无全局 mode）；经
                                          #   GET /sessions/{id} 直出（T2-07 §2），GUI 功率链呈现数据源（T2-11 §3④）。
                                          #   ★不参与 artifact_hash/缓存键——校准数据（M10 版本化）变更时
                                          #   缓存命中重算（§4）。★读时派生：GET /sessions/{id} 出流的
@@ -222,7 +223,8 @@ async def resolve(sess) -> ResolvedArtifacts:
                                                          #   降为 scope="model_only"（.asc 绝对功率由回放设备
                                                          #   定标，平台只承诺模型损耗链，T2-08 §3.6）
                                                          # ★N5「现状评估」（target=None）：评估**将下发的产物**；
-                                                         #   未声明 P_in → mode="relative"（不报错）；纯函数零设备触达
+                                                         #   未声明贡献的输出口 → per_output[o].mode="relative"
+                                                         #   （逐口判定，不报错）；纯函数零设备触达
     arts = ResolvedArtifacts(model.id, artifact, hash_of(artifact), collect_reports(rep, fidelity),
                              power_plan=plan)
     artifact_cache.put(..., arts)

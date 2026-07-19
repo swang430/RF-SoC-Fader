@@ -173,11 +173,15 @@ async def resolve(sess) -> ResolvedArtifacts:
     backend = registry.backend_of(sess)                                  # rfsoc(device) | asc
     caps = backend.capabilities
     if (hit := artifact_cache.get(scen.scenario_id, scen.version, sess.backend, digest(caps))):
-        hit = replace(hit, power_plan=recompute_power_plan(scen, hit))   # ★命中重算 power_plan：帧产物不依赖
-                                                         #   校准、可复用；plan 依赖校准表/code↔dB（M10 版本化配置，
-                                                         #   可能已更新）而缓存键不含校准 digest——命中时以当前校准
-                                                         #   重算（loss 源：hit.reports.fidelity 或 model_repo 取
-                                                         #   模型直算，同 ④ 步三行的封装），绝不回吐陈旧 plan
+        hit = replace(hit, power_plan=recompute_power_plan(scen, hit, sess))
+                                                         # ★命中重算 power_plan：帧产物不依赖校准/会话、可复用；
+                                                         #   plan 依赖 ①校准表（M10 版本化，可能已更新）②**当前
+                                                         #   会话设备的 rendered 设置投影（含 rf_mode——RF/IF bypass
+                                                         #   表选择键，T2-08 §3.6）**——两者都不在缓存键内，故命中
+                                                         #   时以当前校准 + 本会话（sess）设备配置重投影后重算
+                                                         #   （loss 源：hit.reports.fidelity 或 model_repo 直算，
+                                                         #   同 ④ 步的封装）；同 caps 异 RF/IF 模式的会话不得
+                                                         #   互吐陈旧 plan
         set_artifacts(sess, hit)                                         # ★幂等缓存：命中即跳 ①②④
         transition(sess, to=READY); return hit
 

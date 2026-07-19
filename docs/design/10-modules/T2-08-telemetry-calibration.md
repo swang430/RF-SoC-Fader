@@ -303,7 +303,7 @@ CalibrationService.channel_loss_db_of(model) -> Mapping[ChannelKey, float | None
 | **谱归一黄金** | Jakes 谱与平坦谱混合的多 Tap 系数组 | 增益与解析能量比一致（1e-12 容差）；per_tap 逐 Tap 各异、total 全同且保持 Tap 间相对功率 |
 | **bypass 未标定** | None 表调用 | UncalibratedError 且指明 N2 |
 | **电平指引** | PAPR 参数扫描（含 >10 dB） | 建议区间单调、不超 ADC 上限；PAPR>10 dB 返回 feasible=False（绝不产生倒置区间） |
-| **功率计划** | 声明 P_in × 三类目标（P_out/损耗/SNR）矩阵；未声明降级分支；N2 未标定分支 | 衰减建议与 predicted_pout 自洽且不确定度分解齐全；未声明时绝对目标抛 `InputPowerUndeclared` 而相对损耗可用；bypass 依赖路径抛 `UncalibratedError`（不按默认估算） |
+| **功率计划** | 声明 P_in × 三类目标（P_out/损耗/SNR）矩阵；未声明降级分支；N2 未标定 × {现状评估, 显式 target} 双分支 | 衰减建议与 predicted_pout 自洽且不确定度分解齐全；未声明时绝对目标抛 `InputPowerUndeclared` 而相对损耗可用；N2 未标定：**现状评估（target=None）不抛**——受影响口降 relative + `uncalibrated` 标注（resolve 可达 READY）；**显式绝对 target** 才抛 `UncalibratedError`（不按默认估算） |
 | **溢出建议** | 构造合路溢出快照 | Advice 定位正确、建议衰减量 ≥ 反推下限 |
 
 ---

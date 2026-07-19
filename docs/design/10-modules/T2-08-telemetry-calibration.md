@@ -142,7 +142,8 @@ def output_power_plan(p_in: InputPowerDecl | None,
                                                                      #            不得当「非负衰减 dB」作减也不得无符号作加，
                                                                      #            系数↔dB 换算经 M1 唯一定义）
                                                                      #   ★输出口合路（8×8 多输入并入同输出）：
-                                                                     #   P_out[o] = 10·log10(Σ_i 10^(C[i,o]/10))——先线性瓦
+                                                                     #   P_out[o] = 10·log10(Σ_i 10^(C[i,o]/10))——loss=None
+                                                                     #   （零功率信道，T2-05 §3 守卫）的贡献按 0 W 跳过；先线性瓦
                                                                      #   求和再回 dBm，单对公式仅单贡献特例（逐 dB 直加会
                                                                      #   低报多输入输出口）；SNR 分子=该合路和、分母=**仅
                                                                      #   ID9（AWGN_POWER）**折 dBm（经 M1；ID8 使能只门控

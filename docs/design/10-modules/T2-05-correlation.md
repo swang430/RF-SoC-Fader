@@ -60,7 +60,7 @@ class FidelityReport:                   # §5 数值核验产物
     frobenius_rel_err: float            # ‖R̂−R‖F / ‖R‖F
     per_channel_tap_counts: Mapping[tuple[int,int], int]
     quant: QuantReport                  # 量化丢弃统计（透传 M4）
-    channel_loss_db: Mapping[tuple[int,int], float]
+    channel_loss_db: Mapping[tuple[int,int], float | None]
                                         # ★N5 功率参考链（《T1-12》N5，2026-07-19）：逐信道**绝对模型损耗**
                                         #   ——Phase 4 归一化【前】的信道功率折 dB（相对单位输入）；共享
                                         #   归一化会丢绝对刻度，此处显式保留
@@ -128,10 +128,14 @@ def reduce_to_tdl(model, portmap, cfg):                          # ★形参即 
 
     # Phase 4：★全系统共享归一化基准（正确性要点 2）——先全局扫描再归一
     ref_power = max(max(b.power for b in bins) for bins in binned.values())
-    loss_db = {io: -10*log10(sum(b.power for b in bins)) for io, bins in binned.items()}
-                                                              # ★归一化前先记逐信道绝对损耗（N5 功率参考链）——
+    loss_db = {io: (-10*log10(p) if (p := sum(b.power for b in bins)) > 0 else None)
+               for io, bins in binned.items()}                # ★归一化前先记逐信道绝对损耗（N5 功率参考链）——
                                                               #   normalize 丢绝对刻度，入 FidelityReport.channel_loss_db
-                                                              #   （shared_norm_gain_db=−10·log10(ref_power) 同记）
+                                                              #   （shared_norm_gain_db=−10·log10(ref_power) 同记）。
+                                                              #   ★零功率守卫：p≤0（相干对消等）不取 log10——该信道
+                                                              #   loss 记 None（沿「空 taps + 报告计数」既有语义，§6，
+                                                              #   不成为 resolve 失败点）；M8 计划对 None 信道按 0 W
+                                                              #   贡献跳过（对消信道恰无功率输出，语义精确）
     taps = {io: normalize(bins, ref=sqrt(ref_power)) for io, bins in binned.items()}
 
     # Phase 5：目标相关矩阵（供核验/GUI；R 不进设备帧——《T1-03b》）

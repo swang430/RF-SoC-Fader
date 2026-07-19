@@ -106,9 +106,11 @@ class ResolvedArtifacts:
     artifact_hash: str                   # 幂等判据：同 scenario@version × caps → 同 hash
     reports: Reports                     # {import|engine, fidelity?, quant?}——M3/M4/M5 报告透传（GUI 展示）
     power_plan: PowerPlan | None = None  # ★功率参考链评估（M8 §3.6「现状评估」形态，《T1-12》N5）——resolve 期
-                                         #   以场景声明 P_in + 模型损耗 + 产物衰减设置计算；未声明 P_in 时为
-                                         #   相对损耗模式（PowerPlan.mode="relative"）；经 GET /sessions/{id}
-                                         #   直出（T2-07 §2），GUI 功率链/降级呈现的数据源（T2-11 §3④）
+                                         #   以场景声明 P_in + 模型损耗（含共享归一偏移）+ 产物衰减设置计算；
+                                         #   未声明 P_in 时为相对损耗模式（PowerPlan.mode="relative"）；经
+                                         #   GET /sessions/{id} 直出（T2-07 §2），GUI 功率链呈现数据源（T2-11 §3④）。
+                                         #   ★不参与 artifact_hash/缓存键——校准数据（M10 版本化）变更时
+                                         #   缓存命中重算（§4），plan 永远反映当前校准
 ```
 
 - **client_key 不入 Scenario**：EngineSource 持 **GenerateSpec**（GenerateRequest 去 `client_key` 的物理配置投影，类型层面排除、而非约定不填）；每次提交由 M6 生成新 UUID 补全为完整 GenerateRequest（与 T2-03 §3「provenance 剔除 client_key」同口径）——物理配置与传输键分离，scenario 判等不受提交次数影响。
@@ -160,6 +162,11 @@ async def resolve(sess) -> ResolvedArtifacts:
     backend = registry.backend_of(sess)                                  # rfsoc(device) | asc
     caps = backend.capabilities
     if (hit := artifact_cache.get(scen.scenario_id, scen.version, sess.backend, digest(caps))):
+        hit = replace(hit, power_plan=recompute_power_plan(scen, hit))   # ★命中重算 power_plan：帧产物不依赖
+                                                         #   校准、可复用；plan 依赖校准表/code↔dB（M10 版本化配置，
+                                                         #   可能已更新）而缓存键不含校准 digest——命中时以当前校准
+                                                         #   重算（loss 源：hit.reports.fidelity 或 model_repo 取
+                                                         #   模型直算，同 ④ 步三行的封装），绝不回吐陈旧 plan
         set_artifacts(sess, hit)                                         # ★幂等缓存：命中即跳 ①②④
         transition(sess, to=READY); return hit
 
@@ -193,16 +200,19 @@ async def resolve(sess) -> ResolvedArtifacts:
     artifact = backend.render(model, addr_of(sess))                                    # M2
     model = model_repo.put(model)                        # 退化产物入库并回填 hash id（ResolvedArtifacts
                                                          #   用它——与 ① 处 put 同一引用纪律，T2-10 §3）
-    loss = (fidelity.channel_loss_db if fidelity          # ★经 M5 退化：绝对损耗取归一化前记录（T2-05 §2；
-            else calibration.channel_loss_db_of(model))   #   shared_norm_gain_db 供实现域还原核对）
-                                                         # ★直通 TDL/CIR（reduce 不跑、fidelity=None）：从 canonical
-                                                         #   model 逐信道 Σ|gain|² 折 dB 直取（T2-08 §3.6 纯函数——
-                                                         #   直通表幅度即模型意图，无归一化偏移，不解引用 None）
-    plan = calibration.output_power_plan(scen.input_power, loss,
+    loss, norm = ((fidelity.channel_loss_db, fidelity.shared_norm_gain_db) if fidelity
+                  else (calibration.channel_loss_db_of(model), 0.0))
+                                                         # ★经 M5 退化：绝对损耗 + 共享归一偏移一并取归一化前记录
+                                                         #   （T2-05 §2）——rendered 设置作用在【归一化域】，偏移
+                                                         #   必须随行入 plan，否则绝对预测带系统性刻度差
+                                                         # ★直通 TDL/CIR（reduce 不跑、fidelity=None）：损耗从
+                                                         #   canonical model 直取（T2-08 §3.6 纯函数——直通表幅度
+                                                         #   即模型意图），无归一化偏移=0；不解引用 None
+    plan = calibration.output_power_plan(scen.input_power, loss, shared_norm_gain_db=norm,
                 rendered=power_settings_of(artifact))    # ★N5「现状评估」（target=None，T2-08 §3.6）：rendered=
-                                                         #   产物功率设置摘要（输出衰减/幅值缩放/AWGN 码——manifest
-                                                         #   既有摘要的投影，评估的是**将下发的产物**而非裸模型）；
-                                                         #   未声明 P_in → mode="relative"（不报错）；纯函数零设备触达
+                                                         #   产物功率设置摘要（manifest 既有摘要的投影，评估的是
+                                                         #   **将下发的产物**而非裸模型）；未声明 P_in →
+                                                         #   mode="relative"（不报错）；纯函数零设备触达
     arts = ResolvedArtifacts(model.id, artifact, hash_of(artifact), collect_reports(rep, fidelity),
                              power_plan=plan)
     artifact_cache.put(..., arts)

@@ -132,6 +132,10 @@ def output_power_plan(p_in: InputPowerDecl | None,
                                                                      #   FidelityReport.channel_loss_db（Phase 4 归一化
                                                                      #   前记录，T2-05 §2/§3；shared_norm_gain_db 供
                                                                      #   实现域还原）——共享归一化不丢绝对刻度的保证
+                      shared_norm_gain_db: float = 0.0,              # M5 Phase 4 共享基准偏移（直通模型=0）——
+                                                                     #   rendered 设置作用在【归一化域】，绝对链还原：
+                                                                     #   P_out = P_in − model_loss + shared_norm_gain
+                                                                     #           + rendered 设置折 dB（写域经 M1）
                       rendered: RenderedPowerSettings | None = None,
                       target: TargetPoutDbm | TargetLossDb | TargetSnrDb | None = None) -> PowerPlan:
     # rendered=产物功率设置摘要（输出衰减 ID10/11、逐径幅值缩放、AWGN 功率码——取自 M2 render 产物的
@@ -174,9 +178,10 @@ CalibrationService.rayleigh_norm_gain(taps_coeffs, mode="per_tap") -> tuple[floa
 CalibrationService.bypass_atten_db(mode) -> float            # UncalibratedError 语义
 CalibrationService.input_level_advice(papr_db=...) -> LevelAdvice
 CalibrationService.overflow_guard(snapshot) -> list[Advice]
-CalibrationService.output_power_plan(p_in, model_loss_db,
+CalibrationService.output_power_plan(p_in, model_loss_db, shared_norm_gain_db=0.0,
                                      rendered=None, target=None) -> PowerPlan    # §3.6 功率参考链——
                                                              # 现状评估（target=None）rendered 必传；
+                                                             # 归一化偏移随行（经 M5 时必传，直通=0）；
                                                              # InputPowerUndeclared / UncalibratedError 语义
 CalibrationService.channel_loss_db_of(model) -> Mapping[ChannelKey, float]       # §3.6 直通 TDL/CIR 回退源
 ```

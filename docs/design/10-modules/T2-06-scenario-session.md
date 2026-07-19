@@ -105,6 +105,10 @@ class ResolvedArtifacts:
     artifact: FramePlan | AscFileSet     # M2 render 产物（★dry-run 与 apply 共用同一份——所见即所下）
     artifact_hash: str                   # 幂等判据：同 scenario@version × caps → 同 hash
     reports: Reports                     # {import|engine, fidelity?, quant?}——M3/M4/M5 报告透传（GUI 展示）
+    power_plan: PowerPlan | None = None  # ★功率参考链评估（M8 §3.6「现状评估」形态，《T1-12》N5）——resolve 期
+                                         #   以场景声明 P_in + 模型损耗 + 产物衰减设置计算；未声明 P_in 时为
+                                         #   相对损耗模式（PowerPlan.mode="relative"）；经 GET /sessions/{id}
+                                         #   直出（T2-07 §2），GUI 功率链/降级呈现的数据源（T2-11 §3④）
 ```
 
 - **client_key 不入 Scenario**：EngineSource 持 **GenerateSpec**（GenerateRequest 去 `client_key` 的物理配置投影，类型层面排除、而非约定不填）；每次提交由 M6 生成新 UUID 补全为完整 GenerateRequest（与 T2-03 §3「provenance 剔除 client_key」同口径）——物理配置与传输键分离，scenario 判等不受提交次数影响。

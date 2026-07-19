@@ -129,7 +129,10 @@ def overflow_guard(snap: TelemetrySnapshot) -> list[Advice]:
 #       → 输出衰减/逐径幅值码值（code↔dB 经校准）→ P_out = 计算值 ± 不确定度
 def output_power_plan(p_in: InputPowerDecl | None,
                       model_loss_db: Mapping[ChannelKey, float],     # M5 产物：逐信道模型损耗
-                      target: TargetPoutDbm | TargetLossDb | TargetSnrDb) -> PowerPlan:
+                      target: TargetPoutDbm | TargetLossDb | TargetSnrDb | None = None) -> PowerPlan:
+    # ★target=None →「现状评估」形态：按产物当前衰减设置计算——声明在场 → predicted_pout±不确定度
+    #   （PowerPlan.mode="absolute"）；未声明 → 仅相对损耗（mode="relative"，不报错——评估无绝对请求）。
+    #   M6 resolve 即以此形态计算并挂 ResolvedArtifacts.power_plan（T2-06 §2，经 GET /sessions/{id} 直出）
     # 产出 PowerPlan：输出衰减建议（dB，写域码值换算调 M1 唯一定义）+ predicted_pout_dbm
     #   + uncertainty（分解可见：声明精度（按 source 标注）⊕ code↔dB 定标（HR-CAL-001，T3-03）
     #     ⊕ bypass/插损（N2））——不确定度来源诚实呈现，GUI 直译（T2-11 §3④）
@@ -138,8 +141,8 @@ def output_power_plan(p_in: InputPowerDecl | None,
     # ★SNR 目标同锚：AWGN 功率（ID8/9）是绝对码值域，信号功率取自声明链——
     #   无声明 P_in 时 SNR 语义不可用（同上错误）；不得以遥测 input_level 顶替（§2 语义裁定）
     # ★涉 bypass 依赖路径且 N2 未标定 → UncalibratedError（§3.2 语义，绝不按默认估算）
-    # 消费点：M6 resolve 管线（PowerPlan 随 ResolvedArtifacts 附带，经既有 dry-run/会话
-    #   查询面呈现——不新增 REST 端点）；纯函数，不触设备
+    # 消费点：M6 resolve 管线（「现状评估」形态挂 ResolvedArtifacts.power_plan，经既有会话查询面
+    #   GET /sessions/{id} 直出——不新增 REST 端点，T2-07 §2 响应行已列）；纯函数，不触设备
 ```
 
 ---

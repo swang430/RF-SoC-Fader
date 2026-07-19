@@ -1,7 +1,7 @@
 # T2-07 · M7 API 网关（功能设计）
 
 > 第二册《功能设计》· 第 7 篇（L4：REST/OpenAPI 主力 + SCPI 兼容层 + 认证/审计/限流）
-> 状态：**v1.0 · 已冻结**（2026-07-16，tag: design-t2-v1.0）
+> 状态：**v1.0 · 已冻结**（2026-07-16，tag: design-t2-v1.0）· §2 已随《T1-12》N5（输入功率声明制）修订——`/scenarios` 载荷含 `input_power`、`/sessions/{id}` 响应含 `power_plan`（2026-07-19 PR）
 > 依据：《T1-04 API 策略》（冻结基线：三前端共享 L3、REST 资源模型、SCPI P4）《T1-11 §3 审计》
 > 消费方：M9 SDK、M11 GUI、第三方集成、CI；依赖：M6（场景/会话服务）、M4（导入 job）、M8（遥测服务——接口先行声明，T2-08 落实现）、M10（审计/配置存储）
 
@@ -31,11 +31,11 @@ M7 是 L4 网关：把 L3 服务（M6 为主）表达为三种前端——**REST
 | `/models/{id}/view` | GET | **渲染投影**（`viz-json/v1`——服务端由 canonical model 投影出的渲染数据集：PDP 序列、角度散点、R 矩阵、栅格占用、taps 概要、CIR 引用；可视化台取数面，T2-11 ③/S2）。**canonical 本体不直出**——《T1-04》§7 冻结口径「canonical model 是内部契约，不直接暴露给 API 版本」：投影 schema 随 /v1 合同演进，canonical 变更由投影层吸收；投影是 REST 响应 shape（OpenAPI 内），非持久化格式、不入 M10 注册表 | read | 同步 |
 | `/auth/me` | GET | 当前凭据自述 `{key_id, scope, expires, csrf_token}`——**HttpOnly Cookie 下前端无法解析令牌**，scope 门控与 CSRF 双提交 token（§4）的共同自举面（T2-11 §2）；`csrf_token` 仅 Cookie 会话下发（API-Key 调用无 CSRF 面，字段缺省） | 任一已认证 | 同步 |
 | `/blobs/{ref}` | GET | 内容寻址 blob **只读流式**下载（CIR 播放预览、超限系数等引用取数面；经 M10 open_stream 直出不进内存） | read | 同步 |
-| `/scenarios` | GET `?query=&tag=&level=` /POST | scenario_repo 列表/创建（version=1）。检索参数：`query`=名称模糊、`tag`=标签（T2-06 §2 Scenario.tags）、`level`=**服务端由 source 推导**（Mpdb→RT；Engine→按场景枚举映射 UMa/UMi/RMa/InH→GCM、CDL-x→CDL、TDL-x→TDL，**且 want_cir 置位时一律 TDL+CIR 徽标**——T2-03 §3 转换即 level=TDL/realization=CIR；ModelRef→模型元数据 level）——列表响应含该推导字段（①视图徽标数据源，GUI 不自行推导） | read/write | 同步 |
+| `/scenarios` | GET `?query=&tag=&level=` /POST | scenario_repo 列表/创建（version=1）。检索参数：`query`=名称模糊、`tag`=标签（T2-06 §2 Scenario.tags）、`level`=**服务端由 source 推导**（Mpdb→RT；Engine→按场景枚举映射 UMa/UMi/RMa/InH→GCM、CDL-x→CDL、TDL-x→TDL，**且 want_cir 置位时一律 TDL+CIR 徽标**——T2-03 §3 转换即 level=TDL/realization=CIR；ModelRef→模型元数据 level）——列表响应含该推导字段（①视图徽标数据源，GUI 不自行推导）。**创建/读取载荷含 T2-06 §2 Scenario 全字段——含 ★`input_power` 输入功率声明（`InputPowerDecl`，《T1-12》N5，2026-07-19 修订）**：OpenAPI schema 同步暴露（可选字段），三前端与第三方客户端经 /v1 合同均可声明/读回，不得剥离 | read/write | 同步 |
 | `/scenarios/{id}/versions` | GET | **版本历史列表**（version / created_at / created_by / 变更摘要——①视图版本树数据源；`?version=` 单版读取仍走 `/scenarios/{id}`） | read | 同步 |
 | `/scenarios/{id}` | GET(`?version=`)/PUT/DELETE | 读指定版；**PUT=创建新 version**（版本不可变，T2-06 §2）；DELETE=**归档**（被会话/审计引用，禁止物理删） | read/write | 同步 |
 | `/sessions` | POST `{scenario_id, version, device_id?, backend}` | M6 create（锁定版本） | control | 同步 |
-| `/sessions/{id}` | GET | 状态机态 + **allowed_ops**（M6 按 T2-06 §3 状态表裁决的当前态允许操作集——与 §3 的 409 扩展字段**同源同名**；GUI/客户端按钮可用性的前置驱动面，S1 缺口回馈产物：客户端不得自行由 state 推导）+ **current_op / completed_ops**（有界终局历史——客户端 wait 的 op 关联锚点，T2-06 §2，防 re-apply 旧态误判与续等挂死）+ reports + last_apply + **last_error**（异步失败的结构化错误，T2-06 §2——RESOLVE_FAILED 等终态的唯一定位来源，直译 §3 problem+json 扩展字段）+ tweaks | read | 轮询 |
+| `/sessions/{id}` | GET | 状态机态 + **allowed_ops**（M6 按 T2-06 §3 状态表裁决的当前态允许操作集——与 §3 的 409 扩展字段**同源同名**；GUI/客户端按钮可用性的前置驱动面，S1 缺口回馈产物：客户端不得自行由 state 推导）+ **current_op / completed_ops**（有界终局历史——客户端 wait 的 op 关联锚点，T2-06 §2，防 re-apply 旧态误判与续等挂死）+ reports + **power_plan**（resolve 产物附带的功率参考链评估，T2-06 §2 `ResolvedArtifacts.power_plan`/T2-08 §3.6「现状评估」形态，《T1-12》N5——T2-11 §3④ 功率链呈现的数据源；未 resolve 前缺省）+ last_apply + **last_error**（异步失败的结构化错误，T2-06 §2——RESOLVE_FAILED 等终态的唯一定位来源，直译 §3 problem+json 扩展字段）+ tweaks | read | 轮询 |
 | `/sessions/{id}/resolve` | POST | M6 `submit_resolve`（任务在 M6 运行器内，网关不持协程，T2-06 §4 提交面） | control | **202** |
 | `/sessions/{id}/apply` | POST `?dry_run=` | M6 `submit_apply(auto_resolve=True)`——CREATED 态由 **M6 内部**先 resolve 再 apply；dry_run=true 走同步 `apply(dry_run=True)` 直返 manifest（**仅 READY/ACTIVE**：CREATED 时 M6 抛 InvalidState → 409 指明先 resolve——物化长耗时不得混入同步路径）。网关不检查状态、不编排、不持协程（单次 L3 调用） | control | 202（dry_run 同步返 manifest） |
 | `/sessions/{id}/artifact` | GET `?channel=&format=` | **产物下载**（READY 起可用，M6 artifacts 缓存直出、零设备触达）：asc→全信道 zip 或 `?channel=i_o` 单文件 text/plain；rfsoc→帧序列 octet-stream 或 `?format=manifest` 摘要 JSON。CI 黄金对比与《T1-04》G4「同 scenario 产两种后端产物」的取回面（SDK `apply(out=...)` 即封装此端点落盘）；CREATED 态 → 409 指明先 resolve | read | 同步 |

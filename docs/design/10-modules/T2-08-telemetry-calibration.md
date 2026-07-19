@@ -55,7 +55,7 @@ class TelemetryService:
 | :-- | :-- | :-- |
 | `adc_overrange` 位图 | bit 置位 → `alarm(adc_overload, input=i)` | 位图逐位映射输入端 |
 | `combiner_overflow` / `awgn_overflow` | 置位 → `alarm(overflow, output=o, kind)` | 溢出定位到输出端与成因 |
-| 电平越限 | `input_level` 超配置阈值（迟滞带） | 阈值来自 §3.3 输入电平指引，M10 配置承载 |
+| 电平越限 | `input_level` 超配置阈值（迟滞带，**原码域**） | ★N5 语义修订：阈值以**原码**配置（M10 承载，运营者按外部测量/经验设定）——**不由 §3.3 的 dBm 建议自动换算**（码↔dBm 映射未标定 §8-1，dBm 阈比原码=单位错配、告警误导）；映射标定落地后方可提供 dBm 配置面。ADC 过载位图始终为硬信号（布尔，无标定依赖） |
 | 活性 | 周期遥测帧超时（> K×节奏周期） | `alarm(device_silent)`——T2-02 §5 活性信号的消费端 |
 
 - **迟滞（hysteresis）**：越限告警配置进入/退出双阈值——抖动不产生告警风暴；同一告警持续期间不重复发（状态机：raised→cleared）。
@@ -102,7 +102,9 @@ def input_level_advice(signal_papr_db: float = DEFAULT_PAPR_5G) -> LevelAdvice:
     #       note="建议削峰/CFR；或按峰值约束取均值 ≤ upper 并接受低于参考下限的 SNR 损失")
     #   否则 recommended = (−20 dBm, upper)，feasible=True
     # DEFAULT_PAPR_5G 为保守占位（5G OFDM PAPR 调研未决，N1）——参数化：调研结论落地只改默认值
-    # 产出同时给出告警阈值（§2.2 电平越限规则的数据源，经 M10 配置下发）
+    # 产出为**用户面指引**（GUI 提示/信号源设定参考，dBm 人读）——★N5 修订：**不**自动转 §2.2
+    #   码域告警阈值（码↔dBm 映射未标定 §8-1，单位错配会产生误导告警；码域阈值由运营者
+    #   在 M10 原码配置，标定落地后方接通 dBm→码换算）
 ```
 
 ### 3.4 输出溢出建议（overflow guard——只建议不动作）

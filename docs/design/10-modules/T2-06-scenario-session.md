@@ -231,7 +231,10 @@ async def resolve(sess) -> ResolvedArtifacts:
                                                          #   定标，平台只承诺模型损耗链，T2-08 §3.6）
                                                          # ★N5「现状评估」（target=None）：评估**将下发的产物**；
                                                          #   未声明贡献的输出口 → per_output[o].mode="relative"
-                                                         #   （逐口判定，不报错）；纯函数零设备触达
+                                                         #   （逐口判定，不报错）。★现状评估**永不抛**：N2 未标定
+                                                         #   同样降口内 relative + entry.uncalibrated 标注（T2-08
+                                                         #   §3.6）——只读注解不得让 resolve 失败、不阻塞 READY/
+                                                         #   apply（当前硬件 N2 恰未标定）；纯函数零设备触达
     arts = ResolvedArtifacts(model.id, artifact, hash_of(artifact), collect_reports(rep, fidelity),
                              power_plan=plan)
     artifact_cache.put(..., arts)

@@ -236,7 +236,8 @@ CalibrationService.output_power_plan(p_in, model_loss_db, shared_norm_gain_db=0.
                                                              #   不含径幅）；asc=None→scope=model_only；
                                                              # 归一化偏移随行（经 M5 时必传，直通=0）；
                                                              # InputPowerUndeclared / UncalibratedError 语义
-CalibrationService.channel_loss_db_of(model) -> Mapping[ChannelKey, float]       # §3.6 直通 TDL/CIR 回退源
+CalibrationService.channel_loss_db_of(model) -> Mapping[ChannelKey, float | None]  # §3.6 直通 TDL/CIR 回退源
+                                                             # （None=零功率信道守卫，与 §3.6 签名一致）
 ```
 
 > `input_level_advice` 本期仅经 M10 配置转化为告警阈值与 GUI 提示文案（《T1-12》N1），无直接 REST 用户面；若需只读端点随 S1 回路向 M7 回馈。

@@ -103,7 +103,7 @@
 | T1-03c §10 | 迁移歧义拒：`manual` 来源、index 模式无 frame 声明 → `SchemaMigrationAmbiguous`；高版本 → `SchemaTooNew` | C-M10 段 |
 | T2-03 §6 | 引擎请求预检拒：`frame=world`、统计场景缺 geometry、采样充分性 `update_rate_hz < 2·f_d_max` | C-M3 段 |
 | T2-08 §3/§7 | bypass 未标定 → `UncalibratedError` 绝不静默按 0；越域遥测帧丢弃+计数 | U-M8 段 |
-| T2-08 §3.6（N5 修订） | 未声明 P_in：绝对 P_out/SNR 目标 → `InputPowerUndeclared`（相对损耗不受限）；功率计划涉 bypass 且未标定 → `UncalibratedError` 不按默认估算；遥测 `input_level` 不得顶替声明 P_in | U-M8/C-M8 段 |
+| T2-08 §3.6（N5 修订） | 未声明 P_in：绝对 P_out/SNR 目标 → `InputPowerUndeclared`（相对损耗不受限）；**显式绝对 target** 涉 bypass 未标定 → `UncalibratedError` 不按默认估算，而**现状评估（target=None）不抛**——降 relative + `uncalibrated` 标注、resolve 不失败；遥测 `input_level` 不得顶替声明 P_in | U-M8/C-M8 段 |
 | T2-10 §2/§6 | `$blob` 信封无解析器 → `BlobResolverRequired`；sha256 失败 → `CorruptData` 不返回部分数据 | U-M10/C-M10 段 |
 | T2-06 §3/§6 | 非法状态迁移逐格拒；DEVICE_DIRTY 下 close(disable/leave) → `InvalidCloseError`；`DeviceBusy`/`OperationInFlight` 携扩展字段 | C-M6/C-M7 段 |
 | T2-07 §2/§4/§7 | 401/403 含所需 scope；429 含 Retry-After；CREATED 态 dry_run/artifact → 409 指明先 resolve | C-M7/S-SEC 段 |

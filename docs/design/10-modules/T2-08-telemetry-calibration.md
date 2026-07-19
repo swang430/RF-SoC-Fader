@@ -209,10 +209,12 @@ def output_power_plan(p_in: InputPowerDecl | None,
     # ★涉 bypass 依赖路径且 N2 未标定 → UncalibratedError（§3.2 语义，绝不按默认估算）
     # 消费点：M6 resolve 管线（「现状评估」形态挂 ResolvedArtifacts.power_plan，经既有会话查询面
     #   GET /sessions/{id} 直出——不新增 REST 端点，T2-07 §2 响应行已列）；纯函数，不触设备
-def channel_loss_db_of(model: CanonicalChannelModel) -> Mapping[ChannelKey, float]:
+def channel_loss_db_of(model: CanonicalChannelModel) -> Mapping[ChannelKey, float | None]:
     # ★直通 TDL/CIR 的损耗数据源（reduce 不跑、无 FidelityReport 时 M6 调此回退，T2-06 §4）：
     #   逐信道 Σ|gain|²（TDL taps）/ 能量（CIR）折 dB——直通表幅度即模型意图，无归一化偏移；
     #   与 M5 归一化前记录（channel_loss_db）同口径，两路殊途同源
+    #   ★零功率守卫与 M5 路径镜像（T2-05 §3）：空表/全零 taps 的信道能量 ≤0 → 返 None（不取
+    #   log10、不产 −inf），output_power_plan 对 None 按 0 W 贡献跳过——两路守卫语义一致
 ```
 
 ---

@@ -128,7 +128,10 @@ def overflow_guard(snap: TelemetrySnapshot) -> list[Advice]:
 # 链条：P_in（场景声明，T2-06 §2 InputPowerDecl）→ 信道模型损耗（TDL 归一化，已知）
 #       → 输出衰减/逐径幅值码值（code↔dB 经校准）→ P_out = 计算值 ± 不确定度
 def output_power_plan(p_in: InputPowerDecl | None,
-                      model_loss_db: Mapping[ChannelKey, float],     # M5 产物：逐信道模型损耗
+                      model_loss_db: Mapping[ChannelKey, float],     # M5 产物：逐信道**绝对**模型损耗——
+                                                                     #   FidelityReport.channel_loss_db（Phase 4 归一化
+                                                                     #   前记录，T2-05 §2/§3；shared_norm_gain_db 供
+                                                                     #   实现域还原）——共享归一化不丢绝对刻度的保证
                       target: TargetPoutDbm | TargetLossDb | TargetSnrDb | None = None) -> PowerPlan:
     # ★target=None →「现状评估」形态：按产物当前衰减设置计算——声明在场 → predicted_pout±不确定度
     #   （PowerPlan.mode="absolute"）；未声明 → 仅相对损耗（mode="relative"，不报错——评估无绝对请求）。

@@ -193,7 +193,13 @@ async def resolve(sess) -> ResolvedArtifacts:
     artifact = backend.render(model, addr_of(sess))                                    # M2
     model = model_repo.put(model)                        # 退化产物入库并回填 hash id（ResolvedArtifacts
                                                          #   用它——与 ① 处 put 同一引用纪律，T2-10 §3）
-    arts = ResolvedArtifacts(model.id, artifact, hash_of(artifact), collect_reports(rep, fidelity))
+    plan = calibration.output_power_plan(scen.input_power, fidelity.channel_loss_db)   # ★N5「现状评估」
+                                                         #   （target=None，T2-08 §3.6）：绝对模型损耗取 M5 归一化
+                                                         #   前记录（FidelityReport.channel_loss_db，T2-05 §2；
+                                                         #   shared_norm_gain_db 供实现域还原核对）；未声明
+                                                         #   P_in → mode="relative"（不报错）；纯函数零设备触达
+    arts = ResolvedArtifacts(model.id, artifact, hash_of(artifact), collect_reports(rep, fidelity),
+                             power_plan=plan)
     artifact_cache.put(..., arts)
     set_artifacts(sess, arts)            # ★先落 Session 再发布 READY——轮询方见 READY 即产物可取
     transition(sess, to=READY); return arts        #   （READY 早于 artifacts 落库=下载/dry-run 竞态）

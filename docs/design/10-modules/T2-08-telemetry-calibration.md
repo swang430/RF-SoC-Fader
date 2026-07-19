@@ -152,7 +152,10 @@ class PowerPlan:                          # §3.6 产物——「现状评估」
     per_output: Mapping[int, OutputPowerEntry]       # 键=协议输出端编号（0–7）
     target_advice: Mapping[str, float] | None = None # 目标规划形态的设置建议（本期无 API 接线，
                                           #   随功率工作流升版启用——范围裁定见下）
-def output_power_plan(p_in: InputPowerDecl | None,
+def output_power_plan(p_in_dbm: Mapping[int, float] | None,      # 端口→声明均值功率（dBm）——★M8 原生
+                                                                 #   入参，不引 M6 类型：`InputPowerDecl`
+                                                                 #   （T2-06 §2）由 M6 适配（decl.port_dbm）
+                                                                 #   后传入，依赖保持 M6→M8 单向、不成环
                       model_loss_db: Mapping[ChannelKey, float | None],  # M5 产物：逐信道**绝对**模型损耗
                                                                      #   （None=零功率信道，T2-05 §3 守卫——生产侧
                                                                      #   即产 None，签名必须收，0 W 跳过在本函数内）——
@@ -180,6 +183,10 @@ def output_power_plan(p_in: InputPowerDecl | None,
                                                                      #   也绝不把未声明贡献按 0 W 计入——**逐输出口**判定：
                                                                      #   全部贡献输入已声明 → 该口 absolute；含未声明贡献 →
                                                                      #   该口降 relative 并列 missing_ports（引导补声明）
+                      p_in_source: Literal["user_declared", "external_meter"] | None = None,
+                                                                 # 来源标注（不确定度 declared 分量的精度依据；
+                                                                 #   None=未声明）——原生字面量，置 defaulted 区
+                                                                 #   （必填参数之后——排序纪律同 T2-05 §2 前例）
                       rendered: RenderedPowerSettings | None = None,
                       target: TargetPoutDbm | TargetLossDb | TargetSnrDb | None = None) -> PowerPlan:
     # rendered=产物**输出级**功率设置摘要（输出幅值系数 ID11（线性，写域 1/16384；<1 衰减）——ID10 为
@@ -202,7 +209,7 @@ def output_power_plan(p_in: InputPowerDecl | None,
     # 产出 PowerPlan：输出衰减建议（dB，写域码值换算调 M1 唯一定义）+ predicted_pout_dbm
     #   + uncertainty（分解可见：声明精度（按 source 标注）⊕ code↔dB 定标（HR-CAL-001，T3-03）
     #     ⊕ bypass/插损（N2））——不确定度来源诚实呈现，GUI 直译（T2-11 §3④）
-    # ★p_in=None（未声明）→ 降级：仅受理 TargetLossDb（相对损耗）；
+    # ★p_in_dbm=None（未声明）→ 降级：仅受理 TargetLossDb（相对损耗）；
     #   TargetPoutDbm/TargetSnrDb → 抛 InputPowerUndeclared（指引到场景声明字段）
     # ★SNR 目标同锚：AWGN 功率是绝对码值域——**噪声功率只取 ID9（AWGN_POWER，1/4096）**，
     #   ID8（AWGN_ENABLE）仅门控噪声是否在场、**不入分母**（ID8 关 → 无噪声，SNR 语义不可算，
@@ -232,7 +239,7 @@ CalibrationService.rayleigh_norm_gain(taps_coeffs, mode="per_tap") -> tuple[floa
 CalibrationService.bypass_atten_db(mode) -> float            # UncalibratedError 语义
 CalibrationService.input_level_advice(papr_db=...) -> LevelAdvice
 CalibrationService.overflow_guard(snapshot) -> list[Advice]
-CalibrationService.output_power_plan(p_in, model_loss_db, shared_norm_gain_db=0.0,
+CalibrationService.output_power_plan(p_in_dbm, model_loss_db, shared_norm_gain_db=0.0,  # p_in 为原生映射
                                      rendered=None, target=None) -> PowerPlan    # §3.6 功率参考链——
                                                              # 现状评估：rfsoc rendered 必传（输出级设置，
                                                              #   不含径幅）；asc=None→scope=model_only；

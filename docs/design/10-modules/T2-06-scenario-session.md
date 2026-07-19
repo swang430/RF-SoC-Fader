@@ -219,7 +219,11 @@ async def resolve(sess) -> ResolvedArtifacts:
                                                          # ★直通 TDL/CIR（reduce 不跑、fidelity=None）：损耗从
                                                          #   canonical model 直取（T2-08 §3.6 纯函数——直通表幅度
                                                          #   即模型意图），无归一化偏移=0；不解引用 None
-    plan = calibration.output_power_plan(scen.input_power, loss, shared_norm_gain_db=norm,
+    decl = scen.input_power                                        # ★M6→M8 适配：M8 收原生映射不引本模块
+    plan = calibration.output_power_plan(                          #   类型（依赖单向不成环，T2-08 §3.6）
+                decl.port_dbm if decl else None,
+                loss, shared_norm_gain_db=norm,
+                p_in_source=decl.source if decl else None,
                 rendered=(power_settings_of(artifact)    # ★rfsoc：帧产物的**输出级**设置投影（ID11 衰减/AWGN 码，
                           if sess.backend == "rfsoc"     #   不含径幅——径幅已由 loss+norm 承载，防双计）
                           else None))                    # ★asc：AscFileSet 无帧设置——rendered=None 合法，plan

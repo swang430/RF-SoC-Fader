@@ -52,7 +52,10 @@ ScenarioSource =(联合类型)
 
 @dataclass(frozen=True)
 class InputPowerDecl:                    # 输入功率声明（《T1-12》N5）——场景级、逐输入端口
-    port_dbm: Mapping[int, float]        # 输入端口→声明均值功率（dBm）；键=协议输入端编号（0–7）
+    port_dbm: Mapping[int, float]        # 输入端口→声明均值功率（dBm）；键=协议输入端编号（0–7）。
+                                         #   ★允许部分声明：模型在用输入口未全覆盖时不拒——分口降级
+                                         #   语义见 T2-08 §3.6（未声明端口的贡献**绝不按 0 W 计入**，
+                                         #   受影响输出口降 relative 并列 missing_ports 提示补声明）
     source: Literal["user_declared", "external_meter"] = "user_declared"
                                          # 来源标注（审计与 GUI 明示用）；「设备实测」不在此枚举——
                                          #   随 capabilities.supports_input_power_measurement（M2）解锁再扩

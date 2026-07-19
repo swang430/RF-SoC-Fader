@@ -135,12 +135,19 @@ def output_power_plan(p_in: InputPowerDecl | None,
                       shared_norm_gain_db: float = 0.0,              # M5 Phase 4 共享基准偏移（直通模型=0）——
                                                                      #   rendered 设置作用在【归一化域】。绝对链逐贡献：
                                                                      #   C[i,o] = P_in[i] − model_loss[i,o] + shared_norm_gain
-                                                                     #            + rendered 输出级设置折 dB（写域经 M1）
+                                                                     #            − atten_db[o]（★ID11 输出衰减为**损耗**、
+                                                                     #            显式作减——取加号会把加大衰减算成升功率；
+                                                                     #            衰减码折 dB 经 M1，恒 ≥0）
                                                                      #   ★输出口合路（8×8 多输入并入同输出）：
                                                                      #   P_out[o] = 10·log10(Σ_i 10^(C[i,o]/10))——先线性瓦
                                                                      #   求和再回 dBm，单对公式仅单贡献特例（逐 dB 直加会
                                                                      #   低报多输入输出口）；SNR 分子=该合路和、分母=AWGN
-                                                                     #   设置功率（码值域绝对，经 M1 折 dBm）
+                                                                     #   设置功率（码值域绝对，经 M1 折 dBm，不受 ID11 衰减
+                                                                     #   影响——协议注明衰减不作用于 AWGN）
+                                                                     #   ★部分声明（P_in 未覆盖全部在用输入口）：不失败、
+                                                                     #   也绝不把未声明贡献按 0 W 计入——**逐输出口**判定：
+                                                                     #   全部贡献输入已声明 → 该口 absolute；含未声明贡献 →
+                                                                     #   该口降 relative 并列 missing_ports（引导补声明）
                       rendered: RenderedPowerSettings | None = None,
                       target: TargetPoutDbm | TargetLossDb | TargetSnrDb | None = None) -> PowerPlan:
     # rendered=产物**输出级**功率设置摘要（输出衰减 ID11——ID10 为输出使能、不入预算——与 AWGN 功率码；

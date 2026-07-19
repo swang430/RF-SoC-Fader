@@ -241,7 +241,8 @@ CalibrationService.bypass_atten_db(mode) -> float            # UncalibratedError
 CalibrationService.input_level_advice(papr_db=...) -> LevelAdvice
 CalibrationService.overflow_guard(snapshot) -> list[Advice]
 CalibrationService.output_power_plan(p_in_dbm, model_loss_db, shared_norm_gain_db=0.0,  # p_in 为原生映射
-                                     rendered=None, target=None) -> PowerPlan    # §3.6 功率参考链——
+                                     p_in_source=None, rendered=None, target=None) -> PowerPlan
+                                                             # §3.6 功率参考链——
                                                              # 现状评估：rfsoc rendered 必传（输出级设置，
                                                              #   不含径幅）；asc=None→scope=model_only；
                                                              # 归一化偏移随行（经 M5 时必传，直通=0）；

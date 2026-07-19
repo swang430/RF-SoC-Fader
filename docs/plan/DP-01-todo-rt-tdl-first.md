@@ -67,7 +67,7 @@
 | TD-B-01 | 输入健壮性包：MPDB 预检 dry-run + 校验报告（列/单位/NaN/CIR-CFR 拒收/port_map 缺失，用户可读、逐条定位） | 《T2-04》错误处理节 | U-M4 负向段（《T3-02》负向总账 M4 行） | TD-A-04 | 坏库样例集逐个给出可读诊断而非堆栈 | todo |
 | TD-B-02 | 场景库完整读写：场景 CRUD + 配置即数据（JSON/YAML）+ repository 版本化 + GUI ①场景库视图 | 《T2-06》配置即数据 + 《T2-10》repository + 《T2-11》§3① | C-M10 repository 行；C-M6 场景行 | TD-A-03、TD-A-09 | 场景存→关→开→重放，字节级复现下发帧 | todo |
 | TD-B-03 | 帧文件导出：csv/bin/hex 三类离线输出并入新管线（现有 CLI 能力迁移，无设备也能出帧） | 《T2-02》离线渲染面 + 现有 `cli.py` 差量 | C-M2 离线行；G1 复用对照 | TD-A-05 | 同一场景「在线下发」与「离线导出」字节一致 | todo |
-| TD-B-04 | .asc CIR 导出：AscCirBackend 骨架→可用（A 档现实出口） | 《T2-02》AscCir + 《T1-08》 | C-M2 asc 行；.asc 黄金样例对照（G 族登记） | TD-A-05 | 导出 .asc 对黄金格式一致（I-ORCH-011 链路） | todo |
+| TD-B-04 | .asc CIR 导出：AscCirBackend 骨架→可用（A 档现实出口） | 《T2-02》AscCir + 《T1-08》 | C-M2 asc 行；.asc 黄金样例对照（G 族登记） | TD-A-05 | **RT 链**（TD-A-05 产物）渲染导出 .asc 对黄金格式一致（C-M2 asc 行——纯 M2 面，不依赖 M3）；统计链整链 I-ORCH-011（假引擎 CDL-A 经 M3）随 TD-C-01 销账 | todo |
 | TD-B-05 | 安全带：溢出保护 + bypass 表消费 + 下发前预检「会不会溢出」 | 《T2-08》溢出保护/bypass | C-M8 保护行；负向：预检拦截剧本 | TD-A-08 | 超限场景被预检拦截并给出定位；N2 未标定时 bypass 依赖路径按《T2-08》§3.2 抛 `UncalibratedError`（指明 N2，**绝不按 0/默认值估算**），预检对该路径判「不可判定→不放行」——实测值随 TD-C-09 销账后解锁 | todo |
 | TD-B-06 | 可观测与审计：结构化日志 + 会话审计（begin/end 配对、终局）+ GUI 审计视图 | 《T2-06》审计 + 《T2-11》§4 | 审计完备矩阵行（《T3-00》§5 五类判据） | TD-A-06 | 任一下发可事后回答「谁在何时对哪台设备下了什么」 | todo |
 | TD-B-07 | 打包分发：pip 安装 + 一键启动 Web GUI + HyperRT/torch 依赖隔离部署说明 | 《T1-09》+ 《T1-12》#4 | S 层依赖隔离行（主进程无 torch，《T3-00》§5） | TD-A-09 | 干净环境按说明 15 分钟内完成安装并跑通 MS-A 假设备流程 | todo |

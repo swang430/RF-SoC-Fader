@@ -135,13 +135,17 @@ def output_power_plan(p_in: InputPowerDecl | None,
                       shared_norm_gain_db: float = 0.0,              # M5 Phase 4 共享基准偏移（直通模型=0）——
                                                                      #   rendered 设置作用在【归一化域】，绝对链还原：
                                                                      #   P_out = P_in − model_loss + shared_norm_gain
-                                                                     #           + rendered 设置折 dB（写域经 M1）
+                                                                     #           + rendered 输出级设置折 dB（写域经 M1）
                       rendered: RenderedPowerSettings | None = None,
                       target: TargetPoutDbm | TargetLossDb | TargetSnrDb | None = None) -> PowerPlan:
-    # rendered=产物功率设置摘要（输出衰减 ID10/11、逐径幅值缩放、AWGN 功率码——取自 M2 render 产物的
-    #   manifest 摘要投影：产物已含全部帧参数，纯提取不新增信息；写域码值折 dB 调 M1 唯一定义）
-    # ★target=None →「现状评估」形态（此时 rendered **必传**——预测的是将下发产物的实际 P_out，
-    #   不是无设置的裸模型）：声明在场 → predicted_pout±不确定度（PowerPlan.mode="absolute"）；
+    # rendered=产物**输出级**功率设置摘要（输出衰减 ID11——ID10 为输出使能、不入预算——与 AWGN 功率码；
+    #   取自 M2 render 产物的 manifest 摘要投影：产物已含全部帧参数，纯提取不新增信息；写域码值折 dB
+    #   调 M1 唯一定义）。★不含逐径幅值：径幅即归一化模型本体，已由 model_loss_db+shared_norm_gain_db
+    #   承载——再计入 rendered 即双计（低于共享基准 10 dB 的信道会被错报成 −20 dB）
+    # ★target=None →「现状评估」形态：rendered 对 **rfsoc 帧产物必传**（预测将下发产物的实际 P_out，
+    #   不是无设置的裸模型）；**asc 产物（AscFileSet 无帧/输出级设置）rendered=None 合法** → plan 标注
+    #   scope="model_only"（.asc 绝对功率由回放设备定标，平台只承诺模型损耗链）。
+    #   声明在场 → predicted_pout±不确定度（PowerPlan.mode="absolute"）；
     #   未声明 → 仅相对损耗（mode="relative"，不报错——评估无绝对请求）。
     #   M6 resolve 即以此形态计算并挂 ResolvedArtifacts.power_plan（T2-06 §2，经 GET /sessions/{id} 直出）
     # ★target 给定 →「目标规划」形态（rendered 可 None）：反解输出衰减/幅值设置建议以达 target
@@ -180,7 +184,8 @@ CalibrationService.input_level_advice(papr_db=...) -> LevelAdvice
 CalibrationService.overflow_guard(snapshot) -> list[Advice]
 CalibrationService.output_power_plan(p_in, model_loss_db, shared_norm_gain_db=0.0,
                                      rendered=None, target=None) -> PowerPlan    # §3.6 功率参考链——
-                                                             # 现状评估（target=None）rendered 必传；
+                                                             # 现状评估：rfsoc rendered 必传（输出级设置，
+                                                             #   不含径幅）；asc=None→scope=model_only；
                                                              # 归一化偏移随行（经 M5 时必传，直通=0）；
                                                              # InputPowerUndeclared / UncalibratedError 语义
 CalibrationService.channel_loss_db_of(model) -> Mapping[ChannelKey, float]       # §3.6 直通 TDL/CIR 回退源

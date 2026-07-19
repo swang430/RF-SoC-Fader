@@ -209,10 +209,13 @@ async def resolve(sess) -> ResolvedArtifacts:
                                                          #   canonical model 直取（T2-08 §3.6 纯函数——直通表幅度
                                                          #   即模型意图），无归一化偏移=0；不解引用 None
     plan = calibration.output_power_plan(scen.input_power, loss, shared_norm_gain_db=norm,
-                rendered=power_settings_of(artifact))    # ★N5「现状评估」（target=None，T2-08 §3.6）：rendered=
-                                                         #   产物功率设置摘要（manifest 既有摘要的投影，评估的是
-                                                         #   **将下发的产物**而非裸模型）；未声明 P_in →
-                                                         #   mode="relative"（不报错）；纯函数零设备触达
+                rendered=(power_settings_of(artifact)    # ★rfsoc：帧产物的**输出级**设置投影（ID11 衰减/AWGN 码，
+                          if sess.backend == "rfsoc"     #   不含径幅——径幅已由 loss+norm 承载，防双计）
+                          else None))                    # ★asc：AscFileSet 无帧设置——rendered=None 合法，plan
+                                                         #   降为 scope="model_only"（.asc 绝对功率由回放设备
+                                                         #   定标，平台只承诺模型损耗链，T2-08 §3.6）
+                                                         # ★N5「现状评估」（target=None）：评估**将下发的产物**；
+                                                         #   未声明 P_in → mode="relative"（不报错）；纯函数零设备触达
     arts = ResolvedArtifacts(model.id, artifact, hash_of(artifact), collect_reports(rep, fidelity),
                              power_plan=plan)
     artifact_cache.put(..., arts)
